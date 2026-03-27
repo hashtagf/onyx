@@ -511,13 +511,18 @@ def build_chat_turn(
     new_msg_req: SendMessageRequest,
     user: User,
     db_session: Session,
+    # None → single-model (persona default LLM); non-empty list → multi-model (one LLM per override)
     llm_overrides: list[LLMOverride] | None,
     *,
     litellm_additional_headers: dict[str, str] | None = None,
     custom_tool_additional_headers: dict[str, str] | None = None,
     mcp_headers: dict[str, str] | None = None,
     bypass_acl: bool = False,
+    # Slack context for federated Slack search
     slack_context: SlackContext | None = None,
+    # Additional context to include in the chat history, e.g. Slack threads where the
+    # conversation cannot be represented by a chain of User/Assistant messages.
+    # NOTE: not stored in the database, only passed in to the LLM as context
     additional_context: str | None = None,
 ) -> Generator[AnswerStreamPart, None, ChatTurnSetup]:
     """Shared setup generator for both single-model and multi-model chat turns.
