@@ -22,7 +22,6 @@ from onyx.cache.factory import get_cache_backend
 from onyx.cache.interface import CacheBackend
 from onyx.chat.chat_processing_checker import set_processing_status
 from onyx.chat.chat_state import ChatStateContainer
-from onyx.chat.chat_state import run_chat_loop_with_state_containers
 from onyx.chat.chat_utils import convert_chat_history
 from onyx.chat.chat_utils import create_chat_history_chain
 from onyx.chat.chat_utils import create_chat_session_from_request
@@ -34,7 +33,6 @@ from onyx.chat.compression import compress_chat_history
 from onyx.chat.compression import find_summary_for_branch
 from onyx.chat.compression import get_compression_params
 from onyx.chat.emitter import Emitter
-from onyx.chat.emitter import get_default_emitter
 from onyx.chat.llm_loop import EmptyLLMResponseError
 from onyx.chat.llm_loop import run_llm_loop
 from onyx.chat.models import AnswerStream
@@ -469,11 +467,7 @@ def _resolve_query_processing_hook_result(
 
 @dataclass(frozen=True)
 class ChatTurnSetup:
-    """Immutable context produced by ``build_chat_turn`` and consumed by execution strategies.
-
-    Both ``_run_single_model`` and ``_run_multi_model`` accept this dataclass so
-    all shared setup logic lives in exactly one place.
-    """
+    """Immutable context produced by ``build_chat_turn`` and consumed by ``_run_models``."""
 
     new_msg_req: SendMessageRequest
     chat_session: ChatSession
@@ -965,141 +959,38 @@ def build_chat_turn(
     )
 
 
-def _run_single_model(
+def _run_models(
     setup: ChatTurnSetup,
     user: User,
     db_session: Session,
     external_state_container: ChatStateContainer | None = None,
 ) -> AnswerStream:
-    """Execute a single-model chat turn using the resolved setup context.
+    """Stream packets from one or more LLM loops running in parallel worker threads.
 
-    Constructs the emitter and tools, then delegates to ``run_chat_loop_with_state_containers``
-    (deep research or standard LLM loop depending on the request).
-    """
-    llm = setup.llms[0]
-    assistant_message = setup.reserved_messages[0]
+    Each model gets its own worker thread, DB session, and ``Emitter``. Threads write
+    packets to a shared bounded queue as they are produced; the drain loop yields them
+    in arrival order so the caller receives a single interleaved stream regardless of
+    how many models are running.
 
-    emitter = get_default_emitter()
-    state_container = external_state_container or ChatStateContainer()
+    Single-model (N=1) and multi-model (N>1) use the same execution path — the only
+    difference is that N=1 omits ``model_index`` from packet placements to preserve
+    the backwards-compatible wire format for existing API consumers.
 
-    # Construct tools with the request-scoped DB session and the per-request emitter.
-    tool_dict = construct_tools(
-        persona=setup.persona,
-        db_session=db_session,
-        emitter=emitter,
-        user=user,
-        llm=llm,
-        search_tool_config=SearchToolConfig(
-            user_selected_filters=setup.new_msg_req.internal_search_filters,
-            project_id_filter=setup.search_params.project_id_filter,
-            persona_id_filter=setup.search_params.persona_id_filter,
-            bypass_acl=setup.bypass_acl,
-            slack_context=setup.slack_context,
-            enable_slack_search=_should_enable_slack_search(
-                setup.persona, setup.new_msg_req.internal_search_filters
-            ),
-        ),
-        custom_tool_config=CustomToolConfig(
-            chat_session_id=setup.chat_session.id,
-            message_id=setup.user_message.id,
-            additional_headers=setup.custom_tool_additional_headers,
-            mcp_headers=setup.mcp_headers,
-        ),
-        file_reader_tool_config=FileReaderToolConfig(
-            user_file_ids=setup.available_files.user_file_ids,
-            chat_file_ids=setup.available_files.chat_file_ids,
-        ),
-        allowed_tool_ids=setup.new_msg_req.allowed_tool_ids,
-        search_usage_forcing_setting=setup.search_params.search_usage,
-    )
-    tools: list[Tool] = []
-    for tool_list in tool_dict.values():
-        tools.extend(tool_list)
+    Args:
+        setup: Fully constructed turn context — LLMs, persona, history, tool config.
+        user: Authenticated user making the request.
+        db_session: Caller's DB session (used for setup reads; each worker opens its own
+            session because SQLAlchemy sessions are not thread-safe).
+        external_state_container: Pre-constructed state container for the first model.
+            Used by evals and the non-streaming API path so the caller can inspect
+            accumulated state (tool calls, answer tokens, citations) after the stream
+            is consumed. When ``None`` a fresh container is created automatically.
 
-    if setup.forced_tool_id and setup.forced_tool_id not in [tool.id for tool in tools]:
-        raise ValueError(f"Forced tool {setup.forced_tool_id} not found in tools")
-
-    def llm_loop_completion_callback(sc: ChatStateContainer) -> None:
-        llm_loop_completion_handle(
-            state_container=sc,
-            is_connected=setup.check_is_connected,
-            db_session=db_session,
-            assistant_message=assistant_message,
-            llm=llm,
-            reserved_tokens=setup.reserved_token_count,
-        )
-
-    if setup.new_msg_req.deep_research:
-        if setup.chat_session.project_id:
-            raise RuntimeError("Deep research is not supported for projects")
-
-        yield from run_chat_loop_with_state_containers(
-            lambda emitter, state_container: run_deep_research_llm_loop(
-                emitter=emitter,
-                state_container=state_container,
-                simple_chat_history=setup.simple_chat_history,
-                tools=tools,
-                custom_agent_prompt=setup.custom_agent_prompt,
-                llm=llm,
-                token_counter=get_llm_token_counter(llm),
-                db_session=db_session,
-                skip_clarification=setup.skip_clarification,
-                user_identity=setup.user_identity,
-                chat_session_id=str(setup.chat_session.id),
-                all_injected_file_metadata=setup.all_injected_file_metadata,
-            ),
-            llm_loop_completion_callback,
-            is_connected=setup.check_is_connected,
-            emitter=emitter,
-            state_container=state_container,
-        )
-    else:
-        yield from run_chat_loop_with_state_containers(
-            lambda emitter, state_container: run_llm_loop(
-                emitter=emitter,
-                state_container=state_container,
-                simple_chat_history=setup.simple_chat_history,
-                tools=tools,
-                custom_agent_prompt=setup.custom_agent_prompt,
-                context_files=setup.extracted_context_files,
-                persona=setup.persona,
-                user_memory_context=setup.user_memory_context,
-                llm=llm,
-                token_counter=get_llm_token_counter(llm),
-                db_session=db_session,
-                forced_tool_id=setup.forced_tool_id,
-                user_identity=setup.user_identity,
-                chat_session_id=str(setup.chat_session.id),
-                chat_files=setup.chat_files_for_tools,
-                include_citations=setup.new_msg_req.include_citations,
-                all_injected_file_metadata=setup.all_injected_file_metadata,
-                inject_memories_in_prompt=user.use_memories,
-            ),
-            llm_loop_completion_callback,
-            is_connected=setup.check_is_connected,
-            emitter=emitter,
-            state_container=state_container,
-        )
-
-
-def _run_multi_model(
-    setup: ChatTurnSetup,
-    user: User,
-    db_session: Session,
-) -> AnswerStream:
-    """Execute parallel multi-model streaming using the resolved setup context.
-
-    Launches one worker thread per LLM. Each thread gets:
-    - Its own DB session (SQLAlchemy is not thread-safe)
-    - Its own ``_ModelIndexEmitter`` that tags packets with ``model_index``
-    - A per-thread copy of ``simple_chat_history`` (``run_llm_loop`` mutates the list)
-
-    Packets from all threads are merged via a bounded ``queue.Queue`` and yielded
-    in arrival order, enabling true parallel streaming on the wire.
-
-    Context propagation: ``contextvars.copy_context()`` is called once before
-    submitting futures so each thread inherits the current tenant contextvar.
-    ThreadPoolExecutor does NOT auto-propagate contextvars in Python 3.11.
+    Returns:
+        Generator yielding ``Packet`` objects as they arrive from worker threads —
+        answer tokens, tool output, citations — followed by a terminal ``Packet``
+        containing ``OverallStop`` once all models complete (or one containing
+        ``OverallStop(stop_reason="user_cancelled")`` if the connection drops).
     """
     n_models = len(setup.llms)
 
@@ -1109,18 +1000,32 @@ def _run_multi_model(
     )
 
     state_containers: list[ChatStateContainer] = [
-        ChatStateContainer() for _ in range(n_models)
+        (
+            external_state_container
+            if (external_state_container is not None and i == 0)
+            else ChatStateContainer()
+        )
+        for i in range(n_models)
     ]
     model_succeeded: list[bool] = [False] * n_models
 
     def _run_model(model_idx: int) -> None:
-        """Run one model in a worker thread.
+        """Run one LLM loop inside a worker thread, emitting packets in real-time.
 
-        Uses ``_ModelIndexEmitter`` so packets flow to the merged queue in real-time
-        (not batched after completion), enabling true interleaved parallel streaming.
-        Each thread opens its own DB session for tool execution.
+        Opens its own DB session (SQLAlchemy is not thread-safe), builds tools
+        around the model-specific emitter, then delegates to ``run_llm_loop`` or
+        ``run_deep_research_llm_loop`` depending on the request type.
+
+        Args:
+            model_idx: Zero-based index of the model in ``setup.llms``. Determines
+                which LLM and state container this thread operates on.
         """
-        model_emitter = _ModelIndexEmitter(model_idx, merged_queue)
+        # N=1: model_idx=None keeps model_index as None in packets (backwards compat).
+        # N>1: model_idx=int tags packets with the model's index.
+        model_emitter = Emitter(
+            model_idx=model_idx if n_models > 1 else None,
+            merged_queue=merged_queue,
+        )
         sc = state_containers[model_idx]
         model_llm = setup.llms[model_idx]
 
@@ -1136,7 +1041,8 @@ def _run_multi_model(
                         user_selected_filters=setup.new_msg_req.internal_search_filters,
                         project_id_filter=setup.search_params.project_id_filter,
                         persona_id_filter=setup.search_params.persona_id_filter,
-                        bypass_acl=False,
+                        bypass_acl=setup.bypass_acl,
+                        slack_context=setup.slack_context,
                         enable_slack_search=_should_enable_slack_search(
                             setup.persona, setup.new_msg_req.internal_search_filters
                         ),
@@ -1158,27 +1064,54 @@ def _run_multi_model(
                 for tool_list in thread_tool_dict.values():
                     model_tools.extend(tool_list)
 
+                if setup.forced_tool_id and setup.forced_tool_id not in [
+                    tool.id for tool in model_tools
+                ]:
+                    raise ValueError(
+                        f"Forced tool {setup.forced_tool_id} not found in tools"
+                    )
+
                 # Per-thread copy: run_llm_loop mutates simple_chat_history in-place.
-                run_llm_loop(
-                    emitter=model_emitter,
-                    state_container=sc,
-                    simple_chat_history=list(setup.simple_chat_history),
-                    tools=model_tools,
-                    custom_agent_prompt=setup.custom_agent_prompt,
-                    context_files=setup.extracted_context_files,
-                    persona=setup.persona,
-                    user_memory_context=setup.user_memory_context,
-                    llm=model_llm,
-                    token_counter=get_llm_token_counter(model_llm),
-                    db_session=thread_db_session,
-                    forced_tool_id=setup.forced_tool_id,
-                    user_identity=setup.user_identity,
-                    chat_session_id=str(setup.chat_session.id),
-                    chat_files=setup.chat_files_for_tools,
-                    include_citations=setup.new_msg_req.include_citations,
-                    all_injected_file_metadata=setup.all_injected_file_metadata,
-                    inject_memories_in_prompt=user.use_memories,
-                )
+                if n_models == 1 and setup.new_msg_req.deep_research:
+                    if setup.chat_session.project_id:
+                        raise RuntimeError(
+                            "Deep research is not supported for projects"
+                        )
+                    run_deep_research_llm_loop(
+                        emitter=model_emitter,
+                        state_container=sc,
+                        simple_chat_history=list(setup.simple_chat_history),
+                        tools=model_tools,
+                        custom_agent_prompt=setup.custom_agent_prompt,
+                        llm=model_llm,
+                        token_counter=get_llm_token_counter(model_llm),
+                        db_session=thread_db_session,
+                        skip_clarification=setup.skip_clarification,
+                        user_identity=setup.user_identity,
+                        chat_session_id=str(setup.chat_session.id),
+                        all_injected_file_metadata=setup.all_injected_file_metadata,
+                    )
+                else:
+                    run_llm_loop(
+                        emitter=model_emitter,
+                        state_container=sc,
+                        simple_chat_history=list(setup.simple_chat_history),
+                        tools=model_tools,
+                        custom_agent_prompt=setup.custom_agent_prompt,
+                        context_files=setup.extracted_context_files,
+                        persona=setup.persona,
+                        user_memory_context=setup.user_memory_context,
+                        llm=model_llm,
+                        token_counter=get_llm_token_counter(model_llm),
+                        db_session=thread_db_session,
+                        forced_tool_id=setup.forced_tool_id,
+                        user_identity=setup.user_identity,
+                        chat_session_id=str(setup.chat_session.id),
+                        chat_files=setup.chat_files_for_tools,
+                        include_citations=setup.new_msg_req.include_citations,
+                        all_injected_file_metadata=setup.all_injected_file_metadata,
+                        inject_memories_in_prompt=user.use_memories,
+                    )
 
             model_succeeded[model_idx] = True
 
@@ -1247,7 +1180,7 @@ def _run_multi_model(
                 continue
 
             if isinstance(item, Packet):
-                # Already tagged with model_index by _ModelIndexEmitter
+                # model_index already embedded by the model's Emitter in _run_model
                 yield item
 
         # ── Completion: save each successful model's response ───────────────
@@ -1301,6 +1234,32 @@ def handle_stream_message_objects(
     # Optional external state container for non-streaming access to accumulated state
     external_state_container: ChatStateContainer | None = None,
 ) -> AnswerStream:
+    """Primary entrypoint for a single-model chat turn.
+
+    Builds the turn context via ``build_chat_turn``, then streams packets from
+    ``_run_models`` back to the caller. Handles setup errors, LLM errors, and
+    cancellation uniformly, saving whatever partial state has been accumulated
+    before re-raising or yielding a terminal error packet.
+
+    Args:
+        new_msg_req: The incoming chat request from the user.
+        user: Authenticated user; may be anonymous for public personas.
+        db_session: Database session for this request.
+        litellm_additional_headers: Extra headers forwarded to the LLM provider.
+        custom_tool_additional_headers: Extra headers for custom tool HTTP calls.
+        mcp_headers: Extra headers for MCP tool calls.
+        bypass_acl: If ``True``, document ACL checks are skipped (used by Slack bot).
+        additional_context: Extra context prepended to the LLM's chat history, not
+            stored in the DB (used for Slack thread hydration).
+        slack_context: Federated Slack search context passed through to the search tool.
+        external_state_container: Optional pre-constructed state container. When
+            provided, accumulated state (tool calls, citations, answer tokens) is
+            written into it so the caller can inspect the result after streaming.
+
+    Returns:
+        Generator yielding ``Packet`` objects — answer tokens, tool output, citations —
+        followed by a terminal ``Packet`` containing ``OverallStop``.
+    """
     if new_msg_req.mock_llm_response is not None and not INTEGRATION_TESTS_MODE:
         raise ValueError(
             "mock_llm_response can only be used when INTEGRATION_TESTS_MODE=true"
@@ -1328,7 +1287,7 @@ def handle_stream_message_objects(
         if new_msg_req.mock_llm_response is not None:
             mock_response_token = set_llm_mock_response(new_msg_req.mock_llm_response)
 
-        yield from _run_single_model(
+        yield from _run_models(
             setup=setup,
             user=user,
             db_session=db_session,
@@ -1439,33 +1398,6 @@ def _build_model_display_name(override: LLMOverride) -> str:
 _MODEL_DONE = object()
 
 
-class _ModelIndexEmitter(Emitter):
-    """Emitter that tags packets with model_index and forwards directly to a shared queue.
-
-    Unlike the standard Emitter (which accumulates in a local bus), this puts
-    packets into the shared merged_queue in real-time as they're emitted. This
-    enables true parallel streaming — packets from multiple models interleave
-    on the wire instead of arriving in bursts after each model completes.
-    """
-
-    def __init__(self, model_idx: int, merged_queue: queue.Queue) -> None:
-        super().__init__(queue.Queue())  # bus exists for compat, unused
-        self._model_idx = model_idx
-        self._merged_queue = merged_queue
-
-    def emit(self, packet: Packet) -> None:
-        tagged_placement = Placement(
-            turn_index=packet.placement.turn_index if packet.placement else 0,
-            tab_index=packet.placement.tab_index if packet.placement else 0,
-            sub_turn_index=(
-                packet.placement.sub_turn_index if packet.placement else None
-            ),
-            model_index=self._model_idx,
-        )
-        tagged_packet = Packet(placement=tagged_placement, obj=packet.obj)
-        self._merged_queue.put((self._model_idx, tagged_packet))
-
-
 def handle_multi_model_stream(
     new_msg_req: SendMessageRequest,
     user: User,
@@ -1475,7 +1407,32 @@ def handle_multi_model_stream(
     custom_tool_additional_headers: dict[str, str] | None = None,
     mcp_headers: dict[str, str] | None = None,
 ) -> AnswerStream:
-    """Thin orchestrator: setup via build_chat_turn, execution via _run_multi_model."""
+    """Entrypoint for side-by-side multi-model comparison (2–3 models).
+
+    Validates the override list, builds the turn context via ``build_chat_turn``
+    (which reserves one ``ChatMessage`` row per model), then streams interleaved
+    packets from ``_run_models`` back to the caller. Each packet carries a
+    ``model_index`` in its placement so the frontend can route it to the correct
+    response column.
+
+    Args:
+        new_msg_req: The incoming chat request. ``deep_research`` must be ``False``.
+        user: Authenticated user making the request.
+        db_session: Database session for this request.
+        llm_overrides: Exactly 2 or 3 ``LLMOverride`` objects — one per model to run.
+        litellm_additional_headers: Extra headers forwarded to each LLM provider.
+        custom_tool_additional_headers: Extra headers for custom tool HTTP calls.
+        mcp_headers: Extra headers for MCP tool calls.
+
+    Returns:
+        Generator yielding interleaved ``Packet`` objects from all models, each tagged
+        with ``model_index`` in its placement. Terminates with one
+        ``ChatStateContainerPacket`` per model.
+
+    Raises:
+        ValueError: (yielded as ``StreamingError``) if ``llm_overrides`` is not 2–3
+            items, or if ``deep_research`` is ``True``.
+    """
     n_models = len(llm_overrides)
     if n_models < 2 or n_models > 3:
         raise ValueError(f"Multi-model requires 2-3 overrides, got {n_models}")
@@ -1493,7 +1450,7 @@ def handle_multi_model_stream(
             custom_tool_additional_headers=custom_tool_additional_headers,
             mcp_headers=mcp_headers,
         )
-        yield from _run_multi_model(setup, user, db_session)
+        yield from _run_models(setup, user, db_session)
 
     except ValueError as e:
         logger.exception("Failed to process multi-model chat message.")

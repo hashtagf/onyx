@@ -664,10 +664,22 @@ def set_preferred_response(
     user_message_id: int,
     preferred_assistant_message_id: int,
 ) -> None:
-    """Set the preferred assistant response for a multi-model user message.
+    """Mark one assistant response as the user's preferred choice in a multi-model turn.
 
-    Validates that the user message is a USER type and that the preferred
-    assistant message is a direct child of that user message.
+    Also advances ``latest_child_message_id`` so the preferred response becomes
+    the active branch for any subsequent messages in the conversation.
+
+    Args:
+        db_session: Active database session.
+        user_message_id: Primary key of the ``USER``-type ``ChatMessage`` whose
+            preferred response is being set.
+        preferred_assistant_message_id: Primary key of the ``ASSISTANT``-type
+            ``ChatMessage`` to prefer. Must be a direct child of ``user_message_id``.
+
+    Raises:
+        ValueError: If either message is not found, if ``user_message_id`` does not
+            refer to a USER message, or if the assistant message is not a direct child
+            of the user message.
     """
     user_msg = db_session.get(ChatMessage, user_message_id)
     if user_msg is None:
