@@ -1,7 +1,7 @@
 """Unit tests for multi-model streaming validation and DB helpers.
 
 These are pure unit tests — no real database or LLM calls required.
-The validation logic in run_multi_model_stream fires before any external
+The validation logic in handle_multi_model_stream fires before any external
 calls, so we can trigger it with lightweight mocks.
 """
 
@@ -37,21 +37,21 @@ def _make_override(provider: str = "openai", version: str = "gpt-4") -> LLMOverr
 
 def _start_stream(req: SendMessageRequest, overrides: list[LLMOverride]) -> None:
     """Advance the generator one step to trigger early validation."""
-    from onyx.chat.process_message import run_multi_model_stream
+    from onyx.chat.process_message import handle_multi_model_stream
 
     user = MagicMock()
     user.is_anonymous = False
     user.email = "test@example.com"
     db = MagicMock()
 
-    gen = run_multi_model_stream(req, user, db, overrides)
+    gen = handle_multi_model_stream(req, user, db, overrides)
     # Calling next() executes until the first yield OR raises.
     # Validation errors are raised before any yield.
     next(gen)
 
 
 # ---------------------------------------------------------------------------
-# run_multi_model_stream — validation
+# handle_multi_model_stream — validation
 # ---------------------------------------------------------------------------
 
 

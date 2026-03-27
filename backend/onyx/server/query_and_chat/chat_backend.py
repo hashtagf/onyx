@@ -28,8 +28,8 @@ from onyx.chat.chat_utils import extract_headers
 from onyx.chat.models import ChatFullResponse
 from onyx.chat.models import CreateChatSessionID
 from onyx.chat.process_message import gather_stream_full
+from onyx.chat.process_message import handle_multi_model_stream
 from onyx.chat.process_message import handle_stream_message_objects
-from onyx.chat.process_message import run_multi_model_stream
 from onyx.chat.prompt_utils import get_default_base_system_prompt
 from onyx.chat.stop_signal_checker import set_fence
 from onyx.configs.app_configs import WEB_DOMAIN
@@ -587,7 +587,7 @@ def handle_send_chat_message(
         def multi_model_stream_generator() -> Generator[str, None, None]:
             try:
                 with get_session_with_current_tenant() as db_session:
-                    for obj in run_multi_model_stream(
+                    for obj in handle_multi_model_stream(
                         new_msg_req=chat_message_req,
                         user=user,
                         db_session=db_session,
