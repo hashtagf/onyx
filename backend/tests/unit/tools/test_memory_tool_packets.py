@@ -1,6 +1,5 @@
 """Tests for memory tool streaming packet emissions."""
 
-from queue import Queue
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -19,8 +18,7 @@ from onyx.tools.tool_implementations.memory.models import MemoryToolResponse
 
 @pytest.fixture
 def emitter() -> Emitter:
-    bus: Queue = Queue()
-    return Emitter(bus)
+    return Emitter()
 
 
 @pytest.fixture

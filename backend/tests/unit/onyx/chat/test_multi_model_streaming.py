@@ -272,10 +272,19 @@ class TestRunModels:
     still run but return immediately since run_llm_loop is mocked.
     """
 
-    def test_n1_terminal_packet_is_overall_stop_complete(self) -> None:
-        """The last yielded packet must always be OverallStop(stop_reason='complete')."""
+    def test_n1_overall_stop_from_llm_loop_passes_through(self) -> None:
+        """OverallStop emitted by run_llm_loop is passed through the drain loop unchanged."""
+
+        def emit_stop(**kwargs: Any) -> None:
+            kwargs["emitter"].emit(
+                Packet(
+                    placement=Placement(turn_index=0),
+                    obj=OverallStop(stop_reason="complete"),
+                )
+            )
+
         with (
-            patch("onyx.chat.process_message.run_llm_loop"),
+            patch("onyx.chat.process_message.run_llm_loop", side_effect=emit_stop),
             patch("onyx.chat.process_message.run_deep_research_llm_loop"),
             patch("onyx.chat.process_message.construct_tools", return_value={}),
             patch("onyx.chat.process_message.get_session_with_current_tenant"),
@@ -287,11 +296,15 @@ class TestRunModels:
         ):
             packets = _run_models_collect(_make_setup(n_models=1))
 
-        assert len(packets) > 0
-        last = packets[-1]
-        assert isinstance(last, Packet)
-        assert isinstance(last.obj, OverallStop)
-        assert last.obj.stop_reason == "complete"
+        stops = [
+            p
+            for p in packets
+            if isinstance(p, Packet) and isinstance(p.obj, OverallStop)
+        ]
+        assert len(stops) == 1
+        stop_obj = stops[0].obj
+        assert isinstance(stop_obj, OverallStop)
+        assert stop_obj.stop_reason == "complete"
 
     def test_n1_emitted_packet_has_model_index_none(self) -> None:
         """Single-model path: model_index stays None for wire backwards-compat."""
@@ -444,7 +457,10 @@ class TestRunModels:
             for p in packets
             if isinstance(p, Packet) and isinstance(p.obj, OverallStop)
         ]
-        assert any(s.obj.stop_reason == "user_cancelled" for s in stops)
+        assert any(
+            isinstance(s.obj, OverallStop) and s.obj.stop_reason == "user_cancelled"
+            for s in stops
+        )
 
     def test_completion_handle_called_for_each_successful_model(self) -> None:
         """llm_loop_completion_handle must be called once per model that succeeded."""
