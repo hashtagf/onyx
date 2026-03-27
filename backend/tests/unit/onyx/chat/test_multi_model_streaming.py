@@ -542,6 +542,70 @@ class TestRunModels:
 
         mock_handle.assert_not_called()
 
+    def test_http_disconnect_completion_via_generator_exit(self) -> None:
+        """GeneratorExit from HTTP disconnect triggers wait+completion in finally.
+
+        When the HTTP client closes the connection, Starlette throws GeneratorExit
+        into the stream generator, which propagates into _run_models.  The finally
+        block must call executor.shutdown(wait=True) to wait for LLM threads to
+        finish, then persist their results via llm_loop_completion_handle.
+
+        This is the primary regression for test_send_message_disconnect_and_cleanup:
+        the integration test disconnects mid-stream and expects the DB message to be
+        updated from the TERMINATED placeholder to the real response.
+        """
+        import threading
+
+        thread_completed = threading.Event()
+
+        def emit_then_complete(**kwargs: Any) -> None:
+            """Emit one packet (to give generator a yield point), then finish."""
+            emitter = kwargs["emitter"]
+            emitter.emit(
+                Packet(placement=Placement(turn_index=0), obj=ReasoningStart())
+            )
+            # Small sleep so executor.shutdown(wait=True) in finally actually waits.
+            time.sleep(0.05)
+            thread_completed.set()
+
+        setup = _make_setup(n_models=1)
+        # is_connected() always True — HTTP disconnect does NOT set the Redis stop fence.
+        setup.check_is_connected = MagicMock(return_value=True)
+
+        with (
+            patch(
+                "onyx.chat.process_message.run_llm_loop",
+                side_effect=emit_then_complete,
+            ),
+            patch("onyx.chat.process_message.run_deep_research_llm_loop"),
+            patch("onyx.chat.process_message.construct_tools", return_value={}),
+            patch("onyx.chat.process_message.get_session_with_current_tenant"),
+            patch(
+                "onyx.chat.process_message.llm_loop_completion_handle"
+            ) as mock_handle,
+            patch(
+                "onyx.chat.process_message.get_llm_token_counter",
+                return_value=lambda _: 0,
+            ),
+        ):
+            from onyx.chat.process_message import _run_models
+
+            gen = _run_models(setup, MagicMock(), MagicMock())
+            # Advance to the first yielded packet — generator suspends at `yield item`.
+            first = next(gen)
+            assert isinstance(first, Packet)
+            # Simulate Starlette closing the stream on HTTP client disconnect.
+            # GeneratorExit is thrown at the `yield item` suspension point.
+            gen.close()
+
+        # Finally block must have waited for the thread and saved completion.
+        assert (
+            thread_completed.is_set()
+        ), "LLM thread must complete before gen.close() returns"
+        assert (
+            mock_handle.call_count == 1
+        ), "completion handle must be called for the successful model"
+
     def test_external_state_container_used_for_model_zero(self) -> None:
         """When provided, external_state_container is used as state_containers[0]."""
         from onyx.chat.chat_state import ChatStateContainer

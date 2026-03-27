@@ -1127,6 +1127,7 @@ def _run_models(
     executor = ThreadPoolExecutor(
         max_workers=n_models, thread_name_prefix="multi-model"
     )
+    _completion_done = False
     try:
         for i in range(n_models):
             executor.submit(ctx.run, _run_model, i)
@@ -1164,6 +1165,7 @@ def _run_models(
                         placement=Placement(turn_index=0),
                         obj=OverallStop(type="stop", stop_reason="user_cancelled"),
                     )
+                    _completion_done = True
                     return
                 continue
             else:
@@ -1223,11 +1225,35 @@ def _run_models(
                 logger.exception(
                     f"Failed completion for model {i} ({setup.model_display_names[i]})"
                 )
+        _completion_done = True
 
     finally:
-        # Don't block — futures making live LLM API calls cannot be cancelled once started.
-        # wait=False lets threads complete in the background without blocking the HTTP response.
-        executor.shutdown(wait=False)
+        if _completion_done:
+            # Normal exit or stop-button exit: completion already persisted.
+            # Threads are done (normal path) or can finish in the background (stop-button).
+            executor.shutdown(wait=False)
+        else:
+            # Early exit — GeneratorExit from HTTP client disconnect or an unhandled
+            # exception in the drain loop.  Replicate the old
+            # run_chat_loop_with_state_containers behavior: wait for each worker to
+            # finish, then persist whatever state accumulated.
+            executor.shutdown(wait=True)
+            for i in range(n_models):
+                if not model_succeeded[i]:
+                    continue
+                try:
+                    llm_loop_completion_handle(
+                        state_container=state_containers[i],
+                        is_connected=setup.check_is_connected,
+                        db_session=db_session,
+                        assistant_message=setup.reserved_messages[i],
+                        llm=setup.llms[i],
+                        reserved_tokens=setup.reserved_token_count,
+                    )
+                except Exception:
+                    logger.exception(
+                        f"Failed completion for model {i} on early exit ({setup.model_display_names[i]})"
+                    )
 
 
 def handle_stream_message_objects(
