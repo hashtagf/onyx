@@ -462,6 +462,42 @@ class TestRunModels:
             for s in stops
         )
 
+    def test_completion_handle_called_on_disconnect(self) -> None:
+        """llm_loop_completion_handle must still be called even when user disconnects.
+
+        Regression test for the disconnect-cleanup bug: the old
+        run_chat_loop_with_state_containers always called completion_callback in
+        its finally block (even on disconnect) so the DB message was updated from
+        the TERMINATED placeholder to a partial answer.  The new _run_models must
+        replicate this — otherwise the integration test
+        test_send_message_disconnect_and_cleanup fails because the message stays
+        as "Response was terminated prior to completion, try regenerating."
+        """
+
+        def slow_llm(**_kwargs: Any) -> None:
+            time.sleep(0.3)
+
+        setup = _make_setup(n_models=2)
+        setup.check_is_connected = MagicMock(return_value=False)
+
+        with (
+            patch("onyx.chat.process_message.run_llm_loop", side_effect=slow_llm),
+            patch("onyx.chat.process_message.run_deep_research_llm_loop"),
+            patch("onyx.chat.process_message.construct_tools", return_value={}),
+            patch("onyx.chat.process_message.get_session_with_current_tenant"),
+            patch(
+                "onyx.chat.process_message.llm_loop_completion_handle"
+            ) as mock_handle,
+            patch(
+                "onyx.chat.process_message.get_llm_token_counter",
+                return_value=lambda _: 0,
+            ),
+        ):
+            _run_models_collect(setup)
+
+        # Must be called once per model, not zero times
+        assert mock_handle.call_count == 2
+
     def test_completion_handle_called_for_each_successful_model(self) -> None:
         """llm_loop_completion_handle must be called once per model that succeeded."""
         setup = _make_setup(n_models=2)

@@ -1139,6 +1139,27 @@ def _run_models(
             except queue.Empty:
                 # Check for user-initiated cancellation every 50 ms.
                 if not setup.check_is_connected():
+                    # Save partial state for every model before exiting.
+                    # The old run_chat_loop_with_state_containers always called
+                    # completion_callback in its finally block (even on disconnect),
+                    # with whatever state had accumulated so far.
+                    # llm_loop_completion_handle handles is_connected()=False
+                    # gracefully: it writes "The generation was stopped by the user."
+                    # (or the partial answer) instead of the TERMINATED placeholder.
+                    for i in range(n_models):
+                        try:
+                            llm_loop_completion_handle(
+                                state_container=state_containers[i],
+                                is_connected=setup.check_is_connected,
+                                db_session=db_session,
+                                assistant_message=setup.reserved_messages[i],
+                                llm=setup.llms[i],
+                                reserved_tokens=setup.reserved_token_count,
+                            )
+                        except Exception:
+                            logger.exception(
+                                f"Failed completion for model {i} on disconnect ({setup.model_display_names[i]})"
+                            )
                     yield Packet(
                         placement=Placement(turn_index=0),
                         obj=OverallStop(type="stop", stop_reason="user_cancelled"),
@@ -1313,8 +1334,7 @@ def handle_stream_message_objects(
     except EmptyLLMResponseError as e:
         stack_trace = traceback.format_exc()
         logger.warning(
-            "LLM returned an empty response "
-            f"(provider={e.provider}, model={e.model}, tool_choice={e.tool_choice})"
+            f"LLM returned an empty response (provider={e.provider}, model={e.model}, tool_choice={e.tool_choice})"
         )
         yield StreamingError(
             error=e.client_error_msg,
