@@ -1116,10 +1116,16 @@ def _run_models(
             model_succeeded[model_idx] = True
 
         except Exception as e:
-            merged_queue.put((model_idx, e))
+            try:
+                merged_queue.put((model_idx, e), timeout=5.0)
+            except queue.Full:
+                pass  # Drain loop gone (GeneratorExit); thread exits cleanly
 
         finally:
-            merged_queue.put((model_idx, _MODEL_DONE))
+            try:
+                merged_queue.put((model_idx, _MODEL_DONE), timeout=5.0)
+            except queue.Full:
+                pass  # Drain loop gone (GeneratorExit); thread exits cleanly
 
     # Copy contextvars before submitting futures — ThreadPoolExecutor does NOT
     # auto-propagate contextvars in Python 3.11; threads would inherit a blank context.

@@ -71,7 +71,11 @@ class Emitter:
             )
             tagged_packet = Packet(placement=tagged_placement, obj=packet.obj)
             key = self._model_idx if self._model_idx is not None else 0
-            self._merged_queue.put((key, tagged_packet))
+            try:
+                self._merged_queue.put((key, tagged_packet), timeout=1.0)
+            except queue.Full:
+                # Drain loop is gone (e.g. GeneratorExit on disconnect); discard packet.
+                pass
         else:
             self.bus.put(packet)
 
