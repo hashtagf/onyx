@@ -574,7 +574,7 @@ def build_chat_turn(
         user_id=llm_user_identifier, session_id=str(chat_session.id)
     )
 
-    # ── Telemetry ────────────────────────────────────────────────────────────
+    # Milestone tracking, most devs using the API don't need to understand this
     mt_cloud_telemetry(
         tenant_id=tenant_id,
         distinct_id=str(user.id) if not user.is_anonymous else tenant_id,
@@ -593,7 +593,8 @@ def build_chat_turn(
         },
     )
 
-    # ── LLM construction ────────────────────────────────────────────────────
+    # Check LLM cost limits before using the LLM (only for Onyx-managed keys),
+    # then build the LLM instance(s).
     if is_multi:
         assert llm_overrides is not None
         llms: list[LLM] = []
@@ -630,7 +631,7 @@ def build_chat_turn(
         model_display_names = [""]
         token_counter = get_llm_token_counter(primary_llm)
 
-    # ── File verification, chat history chain ────────────────────────────────
+    # Verify that the user-specified files actually belong to the user
     verify_user_files(
         user_files=new_msg_req.file_descriptors,
         user_id=user_id,
@@ -638,10 +639,15 @@ def build_chat_turn(
         project_id=chat_session.project_id,
     )
 
+    # Re-create linear history of messages
     chat_history = create_chat_history_chain(
         chat_session_id=chat_session.id, db_session=db_session
     )
 
+    # Determine the parent message based on the request:
+    # - AUTO_PLACE_AFTER_LATEST_MESSAGE (-1): auto-place after latest message in chain
+    # - None or root ID: regeneration from root (first message)
+    # - positive int: place after that specific parent message
     root_message = get_or_create_root_message(
         chat_session_id=chat_session.id, db_session=db_session
     )
@@ -652,6 +658,7 @@ def build_chat_turn(
         new_msg_req.parent_message_id is None
         or new_msg_req.parent_message_id == root_message.id
     ):
+        # Regeneration from root — clear history so we start fresh
         parent_message = root_message
         chat_history = []
     else:
@@ -659,6 +666,7 @@ def build_chat_turn(
         for i in range(len(chat_history) - 1, -1, -1):
             if chat_history[i].id == new_msg_req.parent_message_id:
                 parent_message = chat_history[i]
+                # Truncate to only messages up to and including the parent
                 chat_history = chat_history[: i + 1]
                 break
 
@@ -673,13 +681,18 @@ def build_chat_turn(
         user_message = parent_message
     else:
         # New message — run the Query Processing hook before saving to DB.
-        # Skip for empty/whitespace-only messages — no meaningful query to process.
+        # Skipped on regeneration: the message already exists and was accepted previously.
+        # Skip for empty/whitespace-only messages — no meaningful query to process,
+        # and SendMessageRequest.message has no min_length guard.
         if message_text.strip():
             hook_result = execute_hook(
                 db_session=db_session,
                 hook_point=HookPoint.QUERY_PROCESSING,
                 payload=QueryProcessingPayload(
                     query=message_text,
+                    # Pass None for anonymous users or authenticated users without an email
+                    # (e.g. some SSO flows). QueryProcessingPayload.user_email is str | None,
+                    # so None is accepted and serialised as null in both cases.
                     user_email=None if user.is_anonymous else user.email,
                     chat_session_id=str(chat_session.id),
                 ).model_dump(),
@@ -701,7 +714,9 @@ def build_chat_turn(
         )
         chat_history.append(user_message)
 
-    # ── Available file IDs ────────────────────────────────────────────────────
+    # Collect file IDs for the file reader tool *before* summary truncation so
+    # that files attached to older (summarized-away) messages are still accessible
+    # via the FileReaderTool.
     available_files = _collect_available_file_ids(
         chat_history=chat_history,
         project_id=chat_session.project_id,
@@ -709,8 +724,11 @@ def build_chat_turn(
         db_session=db_session,
     )
 
-    # ── Summary and summarized file metadata ─────────────────────────────────
+    # Find applicable summary for the current branch
     summary_message = find_summary_for_branch(db_session, chat_history)
+    # Collect file metadata from messages that will be dropped by summary truncation.
+    # These become "pre-summarized" file metadata so the forgotten-file mechanism can
+    # still tell the LLM about them.
     summarized_file_metadata: dict[str, FileToolMetadata] = {}
     if summary_message and summary_message.last_summarized_message_id:
         cutoff_id = summary_message.last_summarized_message_id
@@ -724,17 +742,26 @@ def build_chat_turn(
                 summarized_file_metadata[file_id] = FileToolMetadata(
                     file_id=file_id,
                     filename=fd.get("name") or "unknown",
+                    # We don't know the exact size without loading the file,
+                    # but 0 signals "unknown" to the LLM.
                     approx_char_count=0,
                 )
+        # Filter chat_history to only messages after the cutoff
         chat_history = [m for m in chat_history if m.id > cutoff_id]
 
     # Compute skip-clarification flag for deep research path (cheap, always available)
     skip_clarification = is_last_assistant_message_clarification(chat_history)
 
-    # ── User memory, custom agent prompt ─────────────────────────────────────
     user_memory_context = get_memories(user, db_session)
+
+    # This prompt may come from the Agent or Project. Fetched here (before run_llm_loop)
+    # because the inner loop shouldn't need to access the DB-form chat history, but we
+    # need it early for token reservation.
     custom_agent_prompt = get_custom_agent_prompt(persona, chat_session)
 
+    # When use_memories is disabled, strip memories from the prompt context but keep
+    # user info/preferences. The full context is still passed to the LLM loop for
+    # memory tool persistence.
     prompt_memory_context = (
         user_memory_context
         if user.use_memories
@@ -753,7 +780,9 @@ def build_chat_turn(
         user_memory_context=prompt_memory_context,
     )
 
-    # ── Context files, search params ─────────────────────────────────────────
+    # Determine which user files to use. A custom persona fully supersedes the project —
+    # project files are never loaded or searchable when a custom persona is in play.
+    # Only the default persona inside a project uses the project's files.
     context_user_files = resolve_context_user_files(
         persona=persona,
         project_id=chat_session.project_id,
@@ -781,13 +810,13 @@ def build_chat_turn(
         extracted_context_files=extracted_context_files,
     )
 
+    # Also grant access to persona-attached user files for FileReaderTool
     if persona.user_files:
         existing = set(available_files.user_file_ids)
         for uf in persona.user_files:
             if uf.id not in existing:
                 available_files.user_file_ids.append(uf.id)
 
-    # ── Tool metadata ─────────────────────────────────────────────────────────
     all_tools = get_tools(db_session)
     tool_id_to_name_map = {tool.id: tool.name for tool in all_tools}
 
@@ -804,8 +833,10 @@ def build_chat_turn(
     ):
         forced_tool_id = None
 
-    # ── File loading ──────────────────────────────────────────────────────────
+    # TODO: Once summarization is done, we don't need to load all files from the beginning.
+    # Load all files needed for this chat chain into memory.
     files = load_all_chat_files(chat_history, db_session)
+    # Convert loaded files to ChatFile format for tools like PythonTool
     chat_files_for_tools = _convert_loaded_files_to_chat_files(files)
 
     # ── Reserve assistant message ID(s) → yield to frontend ──────────────────
@@ -837,7 +868,8 @@ def build_chat_turn(
             reserved_assistant_message_id=assistant_response.id,
         )
 
-    # ── Chat history conversion ───────────────────────────────────────────────
+    # Convert the chat history into a simple format that is free of any DB objects
+    # and is easy to parse for the agent loop.
     has_file_reader_tool = any(
         tool.in_code_tool_id == "file_reader" for tool in all_tools
     )
@@ -852,10 +884,18 @@ def build_chat_turn(
     )
     simple_chat_history = chat_history_result.simple_messages
 
+    # Metadata for every text file injected into the history. After context-window
+    # truncation drops older messages, the LLM loop compares surviving file_id tags
+    # against this map to discover "forgotten" files and provide their metadata to
+    # FileReaderTool.
     all_injected_file_metadata: dict[str, FileToolMetadata] = (
         chat_history_result.all_injected_file_metadata if has_file_reader_tool else {}
     )
 
+    # Merge in file metadata from messages dropped by summary truncation. These files
+    # are no longer in simple_chat_history so they'd be invisible to the forgotten-file
+    # mechanism — they'll always appear as "forgotten" since no surviving message carries
+    # their file_id tag.
     if summarized_file_metadata:
         for fid, meta in summarized_file_metadata.items():
             all_injected_file_metadata.setdefault(fid, meta)
