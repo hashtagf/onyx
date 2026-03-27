@@ -111,6 +111,7 @@ from onyx.server.query_and_chat.streaming_models import CitationInfo
 from onyx.server.query_and_chat.streaming_models import OverallStop
 from onyx.server.query_and_chat.streaming_models import Packet
 from onyx.server.usage_limits import check_llm_cost_limit_for_provider
+from onyx.tools.constants import FILE_READER_TOOL_ID
 from onyx.tools.constants import SEARCH_TOOL_ID
 from onyx.tools.interface import Tool
 from onyx.tools.models import ChatFile
@@ -870,7 +871,7 @@ def build_chat_turn(
     # Convert the chat history into a simple format that is free of any DB objects
     # and is easy to parse for the agent loop.
     has_file_reader_tool = any(
-        tool.in_code_tool_id == "file_reader" for tool in all_tools
+        tool.in_code_tool_id == FILE_READER_TOOL_ID for tool in all_tools
     )
 
     chat_history_result = convert_chat_history(
