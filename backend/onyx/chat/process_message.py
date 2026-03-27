@@ -1238,22 +1238,45 @@ def _run_models(
             # run_chat_loop_with_state_containers behavior: wait for each worker to
             # finish, then persist whatever state accumulated.
             executor.shutdown(wait=True)
-            for i in range(n_models):
-                if not model_succeeded[i]:
-                    continue
-                try:
-                    llm_loop_completion_handle(
-                        state_container=state_containers[i],
-                        is_connected=setup.check_is_connected,
-                        db_session=db_session,
-                        assistant_message=setup.reserved_messages[i],
-                        llm=setup.llms[i],
-                        reserved_tokens=setup.reserved_token_count,
-                    )
-                except Exception:
-                    logger.exception(
-                        f"Failed completion for model {i} on early exit ({setup.model_display_names[i]})"
-                    )
+            # The caller's db_session is already closed by the time this finally block
+            # runs: GeneratorExit propagates through stream_generator's
+            # `with get_session_with_current_tenant()` __exit__ BEFORE the garbage-
+            # collection chain reaches _run_models.close().  Open a fresh session so
+            # llm_loop_completion_handle can safely write to the DB.
+            try:
+                with get_session_with_current_tenant() as cleanup_db:
+                    for i in range(n_models):
+                        if not model_succeeded[i]:
+                            continue
+                        try:
+                            # Re-load the reserved message in the new session.
+                            # setup.reserved_messages[i] is detached from the closed
+                            # caller session but its .id attribute is still accessible.
+                            assistant_message = cleanup_db.get(
+                                ChatMessage, setup.reserved_messages[i].id
+                            )
+                            if assistant_message is None:
+                                logger.error(
+                                    f"Assistant message not found for model {i} "
+                                    f"during early-exit cleanup ({setup.model_display_names[i]})"
+                                )
+                                continue
+                            llm_loop_completion_handle(
+                                state_container=state_containers[i],
+                                is_connected=setup.check_is_connected,
+                                db_session=cleanup_db,
+                                assistant_message=assistant_message,
+                                llm=setup.llms[i],
+                                reserved_tokens=setup.reserved_token_count,
+                            )
+                        except Exception:
+                            logger.exception(
+                                f"Failed completion for model {i} on early exit ({setup.model_display_names[i]})"
+                            )
+            except Exception:
+                logger.exception(
+                    "Failed to open cleanup session for early-exit completion"
+                )
 
 
 def handle_stream_message_objects(
