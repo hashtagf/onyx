@@ -1,6 +1,6 @@
 module github.com/onyx-dot-app/onyx/tools/ods
 
-go 1.26.1
+go 1.26.0
 
 require (
 	github.com/gdamore/tcell/v2 v2.13.8
