@@ -6,7 +6,9 @@ calls, so we can trigger it with lightweight mocks.
 """
 
 import time
+from collections.abc import Generator
 from typing import Any
+from typing import cast
 from unittest.mock import MagicMock
 from unittest.mock import patch
 from uuid import uuid4
@@ -590,7 +592,9 @@ class TestRunModels:
         ):
             from onyx.chat.process_message import _run_models
 
-            gen = _run_models(setup, MagicMock(), MagicMock())
+            # cast to Generator so .close() is available; _run_models returns
+            # AnswerStream (= Iterator) but the actual object is always a generator.
+            gen = cast(Generator, _run_models(setup, MagicMock(), MagicMock()))
             # Advance to the first yielded packet — generator suspends at `yield item`.
             first = next(gen)
             assert isinstance(first, Packet)
