@@ -63,6 +63,10 @@ _SOURCE_IMAGE_FILENAMES: Mapping[DocumentSource, str] = {
     DocumentSource.BRAINTRUST: "Braintrust.png",
     # LumApps ships only as an inline SVG in web; no PNG asset exists
     DocumentSource.LUMAPPS: _DEFAULT_SOURCE_IMAGE_FILENAME,
+    # Telegram ships only as an inline SVG in web; no PNG asset exists
+    DocumentSource.TELEGRAM: _DEFAULT_SOURCE_IMAGE_FILENAME,
+    # LINE ships only as an inline SVG in web; no PNG asset exists
+    DocumentSource.LINE: _DEFAULT_SOURCE_IMAGE_FILENAME,
     DocumentSource.MOCK_CONNECTOR: _DEFAULT_SOURCE_IMAGE_FILENAME,
     DocumentSource.USER_FILE: _DEFAULT_SOURCE_IMAGE_FILENAME,
     DocumentSource.CRAFT_FILE: _DEFAULT_SOURCE_IMAGE_FILENAME,

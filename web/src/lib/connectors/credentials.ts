@@ -253,6 +253,14 @@ export interface DiscordCredentialJson {
   discord_bot_token: string;
 }
 
+export interface TelegramCredentialJson {
+  telegram_bot_token: string;
+}
+
+export interface LineCredentialJson {
+  line_channel_access_token: string;
+}
+
 export interface FreshdeskCredentialJson {
   freshdesk_domain: string;
   freshdesk_api_key: string;
@@ -507,6 +515,8 @@ export const credentialTemplates: Record<ValidSources, any> = {
   ingestion_api: null,
   federated_slack: null,
   discord: { discord_bot_token: "" } as DiscordCredentialJson,
+  telegram: { telegram_bot_token: "" } as TelegramCredentialJson,
+  line: { line_channel_access_token: "" } as LineCredentialJson,
 
   // NOTE: These are Special Cases
   google_drive: { google_tokens: "" } as GoogleDriveCredentialJson,
@@ -566,6 +576,12 @@ export const credentialDisplayNames: Record<string, string> = {
 
   // Slack
   slack_bot_token: "Slack Bot Token",
+
+  // Telegram
+  telegram_bot_token: "Bot Token",
+
+  // LINE
+  line_channel_access_token: "Channel Access Token",
 
   // Discord
   discord_bot_token: "Discord Bot Token",

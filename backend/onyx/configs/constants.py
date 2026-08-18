@@ -296,6 +296,8 @@ class DocumentSource(str, Enum):
     TESTRAIL = "testrail"
     BRAINTRUST = "braintrust"
     LUMAPPS = "lumapps"
+    TELEGRAM = "telegram"
+    LINE = "line"
 
     # Special case just for integration tests
     MOCK_CONNECTOR = "mock_connector"

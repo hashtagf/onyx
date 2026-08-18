@@ -6,7 +6,7 @@ import { DOCS_ADMINS_PATH } from "@/lib/constants";
 
 export function isLoadState(connector_name: string): boolean {
   // TODO: centralize connector metadata like this somewhere instead of hardcoding it here
-  const loadStateConnectors = ["web", "xenforo", "file", "airtable"];
+  const loadStateConnectors = ["web", "xenforo", "file", "airtable", "line"];
   if (loadStateConnectors.includes(connector_name)) {
     return true;
   }
@@ -1796,6 +1796,20 @@ For example, specifying .*-alerts as a "channel to exclude" will cause the conne
       },
     ],
   },
+  telegram: {
+    description: "Configure Telegram connector",
+    values: [],
+    advanced_values: [],
+    subtext:
+      "Onyx reads messages your Telegram bot receives. The bot must be added to the chats you want to index, and users must start it in private chats. The Bot API cannot backfill older history, so indexing begins when the connector is first created.",
+  },
+  line: {
+    description: "Configure LINE connector",
+    values: [],
+    advanced_values: [],
+    subtext:
+      "Onyx indexes the follower roster (directory) of your LINE Official Account. The Messaging API has no message-history endpoint, so chat messages are not indexed. Requires a verified or premium account and the profile scope.",
+  },
   freshdesk: {
     description: "Configure Freshdesk connector",
     values: [],
@@ -2347,6 +2361,10 @@ export interface AsanaConfig {
 export interface FreshdeskConfig {}
 
 export interface FirefliesConfig {}
+
+export interface TelegramConfig {}
+
+export interface LineConfig {}
 
 export interface MediaWikiConfig extends MediaWikiBaseConfig {
   hostname: string;

@@ -41,6 +41,7 @@ import {
   SvgHubspot,
   SvgJira,
   SvgLinear,
+  SvgLine,
   SvgLoopio,
   SvgLumapps,
   SvgMediawiki,
@@ -53,6 +54,7 @@ import {
   SvgSlack,
   SvgSlab,
   SvgTeams,
+  SvgTelegram,
   SvgTestrail,
   SvgWikipedia,
   SvgXenforo,
@@ -355,6 +357,18 @@ export const SOURCE_METADATA_MAP: SourceMap = {
     displayName: "Zulip",
     category: SourceCategory.Messaging,
     docs: `${DOCS_ADMINS_PATH}/connectors/official/zulip`,
+  },
+  telegram: {
+    icon: SvgTelegram,
+    displayName: "Telegram",
+    category: SourceCategory.Messaging,
+    docs: `${DOCS_ADMINS_PATH}/connectors/official/telegram`,
+  },
+  line: {
+    icon: SvgLine,
+    displayName: "LINE",
+    category: SourceCategory.Messaging,
+    docs: `${DOCS_ADMINS_PATH}/connectors/official/line`,
   },
 
   // Sales

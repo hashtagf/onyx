@@ -49,6 +49,8 @@ import SvgSharepoint from "@/logos/sharepoint";
 import SvgSlab from "@/logos/slab";
 import SvgSlack from "@/logos/slack";
 import SvgTeams from "@/logos/teams";
+import SvgTelegram from "@/logos/telegram";
+import SvgLine from "@/logos/line";
 import SvgTestrail from "@/logos/testrail";
 import SvgWikipedia from "@/logos/wikipedia";
 import SvgXenforo from "@/logos/xenforo";
@@ -110,6 +112,8 @@ const SOURCE_META: Record<DocumentSource, SourceMeta> = {
   gmail: { icon: SvgGmail, displayName: "Gmail" },
   imap: { icon: SvgMail, displayName: "Email" },
   discord: { icon: SvgDiscord, displayName: "Discord" },
+  telegram: { icon: SvgTelegram, displayName: "Telegram" },
+  line: { icon: SvgLine, displayName: "LINE" },
   xenforo: { icon: SvgXenforo, displayName: "Xenforo" },
   zulip: { icon: SvgZulip, displayName: "Zulip" },
   salesforce: { icon: SvgSalesforce, displayName: "Salesforce" },

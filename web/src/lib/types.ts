@@ -640,6 +640,8 @@ export enum ValidSources {
   Braintrust = "braintrust",
   Lumapps = "lumapps",
   Canvas = "canvas",
+  Telegram = "telegram",
+  Line = "line",
 
   // Craft-specific sources
   CraftFile = "craft_file",

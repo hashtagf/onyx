@@ -78,6 +78,8 @@ class TestSecret(StrEnum):
     HIGHSPOT_SECRET = "highspot-secret"
     SLACK_BOT_TOKEN = "slack-bot-token"
     DISCORD_CONNECTOR_BOT_TOKEN = "discord-bot-token"
+    TELEGRAM_BOT_TOKEN = "telegram-bot-token"
+    LINE_CHANNEL_ACCESS_TOKEN = "line-channel-access-token"
     TEAMS_APPLICATION_ID = "teams-application-id"
     TEAMS_DIRECTORY_ID = "teams-directory-id"
     TEAMS_SECRET = "teams-secret"

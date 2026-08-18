@@ -228,6 +228,14 @@ CONNECTOR_CLASS_MAP = {
         module_path="onyx.connectors.lumapps.connector",
         class_name="LumAppsConnector",
     ),
+    DocumentSource.TELEGRAM: ConnectorMapping(
+        module_path="onyx.connectors.telegram.connector",
+        class_name="TelegramConnector",
+    ),
+    DocumentSource.LINE: ConnectorMapping(
+        module_path="onyx.connectors.line.connector",
+        class_name="LineConnector",
+    ),
     # just for integration tests
     DocumentSource.MOCK_CONNECTOR: ConnectorMapping(
         module_path="onyx.connectors.mock_connector.connector",
