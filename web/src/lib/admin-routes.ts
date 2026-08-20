@@ -111,6 +111,18 @@ export const ADMIN_ROUTES = {
     title: "LINE Integration",
     sidebarLabel: "LINE Integration",
   },
+  SERVICE_ACCOUNTS_CE: {
+    path: "/admin/service-accounts",
+    icon: SvgUserKey,
+    title: "Service API Keys",
+    sidebarLabel: "Service API Keys",
+  },
+  USAGE_REPORT: {
+    path: "/admin/usage-report",
+    icon: SvgBarChart,
+    title: "Usage Report",
+    sidebarLabel: "Usage Report",
+  },
   MCP_ACTIONS: {
     path: "/admin/actions/mcp",
     icon: SvgMcp,
