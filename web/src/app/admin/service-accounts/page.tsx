@@ -52,7 +52,10 @@ function ServiceAccountsContent() {
     isLoading,
     error,
     mutate,
-  } = useSWR<ApiKeyDescriptor[]>("/api/admin/api-key", errorHandlingFetcher);
+  } = useSWR<ApiKeyDescriptor[]>(
+    "/api/manage/admin/service-accounts",
+    errorHandlingFetcher
+  );
 
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");

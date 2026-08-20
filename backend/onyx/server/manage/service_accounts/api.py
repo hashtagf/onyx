@@ -1,0 +1,70 @@
+"""CE service-account (API key) management.
+
+Thin admin wrapper over the MIT-licensed API key CRUD in onyx.db.api_key —
+the same functions the Slack/Discord/Telegram/LINE bots use to manage their
+own service keys.
+"""
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from onyx.auth.permissions import require_permission
+from onyx.db.api_key import (
+    ApiKeyDescriptor,
+    fetch_api_keys,
+    insert_api_key,
+    regenerate_api_key,
+    remove_api_key,
+    update_api_key,
+)
+from onyx.db.engine.sql_engine import get_session
+from onyx.db.enums import Permission
+from onyx.db.models import User
+from onyx.server.api_key.models import APIKeyArgs
+
+router = APIRouter(prefix="/manage/admin/service-accounts")
+
+
+@router.get("")
+def list_service_accounts(
+    _: User = Depends(require_permission(Permission.FULL_ADMIN_PANEL_ACCESS)),
+    db_session: Session = Depends(get_session),
+) -> list[ApiKeyDescriptor]:
+    return fetch_api_keys(db_session)
+
+
+@router.post("")
+def create_service_account(
+    api_key_args: APIKeyArgs,
+    user: User = Depends(require_permission(Permission.FULL_ADMIN_PANEL_ACCESS)),
+    db_session: Session = Depends(get_session),
+) -> ApiKeyDescriptor:
+    return insert_api_key(db_session, api_key_args, user.id)
+
+
+@router.post("/{api_key_id}/regenerate")
+def regenerate_service_account_key(
+    api_key_id: int,
+    _: User = Depends(require_permission(Permission.FULL_ADMIN_PANEL_ACCESS)),
+    db_session: Session = Depends(get_session),
+) -> ApiKeyDescriptor:
+    return regenerate_api_key(db_session, api_key_id)
+
+
+@router.patch("/{api_key_id}")
+def update_service_account(
+    api_key_id: int,
+    api_key_args: APIKeyArgs,
+    _: User = Depends(require_permission(Permission.FULL_ADMIN_PANEL_ACCESS)),
+    db_session: Session = Depends(get_session),
+) -> ApiKeyDescriptor:
+    return update_api_key(db_session, api_key_id, api_key_args)
+
+
+@router.delete("/{api_key_id}")
+def delete_service_account(
+    api_key_id: int,
+    _: User = Depends(require_permission(Permission.FULL_ADMIN_PANEL_ACCESS)),
+    db_session: Session = Depends(get_session),
+) -> None:
+    remove_api_key(db_session, api_key_id)

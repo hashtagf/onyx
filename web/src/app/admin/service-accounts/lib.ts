@@ -3,7 +3,7 @@ import {
   ApiKeyRole,
 } from "@/app/admin/service-accounts/types";
 
-const BASE_URL = "/api/admin/api-key";
+const BASE_URL = "/api/manage/admin/service-accounts";
 
 async function orThrow(response: Response, action: string): Promise<Response> {
   if (!response.ok) {

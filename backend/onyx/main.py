@@ -131,6 +131,7 @@ from onyx.server.manage.opensearch_migration.api import (
     admin_router as opensearch_migration_admin_router,
 )
 from onyx.server.manage.search_settings import router as search_settings_router
+from onyx.server.manage.service_accounts.api import router as service_accounts_router
 from onyx.server.manage.slack_bot import router as slack_bot_management_router
 from onyx.server.manage.sso.api import admin_router as sso_admin_router
 from onyx.server.manage.telegram_bot.api import router as telegram_bot_router
@@ -560,6 +561,7 @@ def get_application(lifespan_override: Lifespan | None = None) -> FastAPI:
     include_router_with_global_prefix_prepended(application, line_bot_router)
     include_router_with_global_prefix_prepended(application, line_webhook_router)
     include_router_with_global_prefix_prepended(application, usage_insights_router)
+    include_router_with_global_prefix_prepended(application, service_accounts_router)
     include_router_with_global_prefix_prepended(application, persona_router)
     include_router_with_global_prefix_prepended(application, admin_persona_router)
     include_router_with_global_prefix_prepended(application, agents_router)
