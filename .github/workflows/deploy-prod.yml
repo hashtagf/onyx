@@ -79,9 +79,13 @@ jobs:
       - name: Build backend image on Cloud Build
         run: |
           TAG="msai-$(git rev-parse --short HEAD)"
-          gcloud builds submit backend \
+          # --async + describe-polling: streaming logs from `builds submit`
+          # is flaky from WIF-federated credentials and can fail the step
+          # while the build itself succeeds.
+          BUILD_ID=$(gcloud builds submit backend --async \
             --project="$PROJECT" --region="$REGION" \
             --machine-type=e2-highcpu-8 --timeout=3600s \
+            --format="value(id)" \
             --config=/dev/stdin <<EOF
           steps:
           - name: gcr.io/cloud-builders/docker
@@ -89,6 +93,17 @@ jobs:
             args: [build, --target, runtime, -t, $GAR/onyx-backend:$TAG, -t, $GAR/onyx-backend:prod, .]
           images: [$GAR/onyx-backend:$TAG, $GAR/onyx-backend:prod]
           EOF
+          )
+          echo "Build: https://console.cloud.google.com/cloud-build/builds;region=$REGION/$BUILD_ID?project=$PROJECT"
+          while :; do
+            STATUS=$(gcloud builds describe "$BUILD_ID" --project="$PROJECT" --region="$REGION" --format="value(status)")
+            echo "status: $STATUS"
+            case "$STATUS" in
+              SUCCESS) exit 0 ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED) exit 1 ;;
+            esac
+            sleep 30
+          done
 
   build-web:
     needs: changes
@@ -106,9 +121,10 @@ jobs:
       - name: Build web image on Cloud Build
         run: |
           TAG="msai-$(git rev-parse --short HEAD)"
-          gcloud builds submit web \
+          BUILD_ID=$(gcloud builds submit web --async \
             --project="$PROJECT" --region="$REGION" \
             --machine-type=e2-highcpu-8 --timeout=3600s \
+            --format="value(id)" \
             --config=/dev/stdin <<EOF
           steps:
           - name: gcr.io/cloud-builders/docker
@@ -116,6 +132,17 @@ jobs:
             args: [build, -t, $GAR/onyx-web-server:$TAG, -t, $GAR/onyx-web-server:prod, .]
           images: [$GAR/onyx-web-server:$TAG, $GAR/onyx-web-server:prod]
           EOF
+          )
+          echo "Build: https://console.cloud.google.com/cloud-build/builds;region=$REGION/$BUILD_ID?project=$PROJECT"
+          while :; do
+            STATUS=$(gcloud builds describe "$BUILD_ID" --project="$PROJECT" --region="$REGION" --format="value(status)")
+            echo "status: $STATUS"
+            case "$STATUS" in
+              SUCCESS) exit 0 ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED) exit 1 ;;
+            esac
+            sleep 30
+          done
 
   deploy:
     needs: [build-backend, build-web]
