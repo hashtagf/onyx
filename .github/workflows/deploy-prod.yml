@@ -1,0 +1,158 @@
+# Deploy the MSAI Onyx fork to production (router9-vm on GCP).
+#
+# Flow: push to main → Cloud Build builds the changed images (backend and/or
+# web), tagged msai-<sha> AND :prod → SSH over IAP restarts onyx.service on
+# the VM, whose ExecStartPre re-pulls :prod → health check.
+#
+# Auth is keyless (Workload Identity Federation); infra lives in
+# 9router-terraform/cicd.tf. Rollback: retag an older msai-<sha> as :prod
+#   gcloud artifacts docker tags add $GAR/onyx-backend:msai-<old> $GAR/onyx-backend:prod
+# then re-run the deploy job (workflow_dispatch) or restart onyx.service.
+
+name: Deploy to production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "web/**"
+  workflow_dispatch:
+    inputs:
+      build_backend:
+        description: "Build backend image"
+        type: boolean
+        default: true
+      build_web:
+        description: "Build web image"
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  PROJECT: k8s-ms-381210
+  REGION: asia-southeast1
+  GAR: asia-southeast1-docker.pkg.dev/k8s-ms-381210/onyx
+  WIF_PROVIDER: projects/695151832977/locations/global/workloadIdentityPools/github-actions/providers/github-oidc
+  DEPLOYER_SA: github-deployer@k8s-ms-381210.iam.gserviceaccount.com
+  VM: router9-vm
+  ZONE: asia-southeast1-a
+  HEALTH_URL: https://chat.claude-foundation.dev/api/health
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - "backend/**"
+            web:
+              - "web/**"
+
+  build-backend:
+    needs: changes
+    if: >
+      (github.event_name == 'push' && needs.changes.outputs.backend == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_backend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build backend image on Cloud Build
+        run: |
+          TAG="msai-$(git rev-parse --short HEAD)"
+          gcloud builds submit backend \
+            --project="$PROJECT" --region="$REGION" \
+            --machine-type=e2-highcpu-8 --timeout=3600s \
+            --config=/dev/stdin <<EOF
+          steps:
+          - name: gcr.io/cloud-builders/docker
+            env: [DOCKER_BUILDKIT=1]
+            args: [build, --target, runtime, -t, $GAR/onyx-backend:$TAG, -t, $GAR/onyx-backend:prod, .]
+          images: [$GAR/onyx-backend:$TAG, $GAR/onyx-backend:prod]
+          EOF
+
+  build-web:
+    needs: changes
+    if: >
+      (github.event_name == 'push' && needs.changes.outputs.web == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build web image on Cloud Build
+        run: |
+          TAG="msai-$(git rev-parse --short HEAD)"
+          gcloud builds submit web \
+            --project="$PROJECT" --region="$REGION" \
+            --machine-type=e2-highcpu-8 --timeout=3600s \
+            --config=/dev/stdin <<EOF
+          steps:
+          - name: gcr.io/cloud-builders/docker
+            env: [DOCKER_BUILDKIT=1]
+            args: [build, -t, $GAR/onyx-web-server:$TAG, -t, $GAR/onyx-web-server:prod, .]
+          images: [$GAR/onyx-web-server:$TAG, $GAR/onyx-web-server:prod]
+          EOF
+
+  deploy:
+    needs: [build-backend, build-web]
+    # Run when at least one build succeeded and none failed (a skipped build
+    # job is fine — only that half changed).
+    if: >
+      !cancelled() && !contains(needs.*.result, 'failure') &&
+      contains(needs.*.result, 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Restart onyx stack (re-pulls :prod images)
+        run: |
+          # First OS Login connection can race key propagation; retry.
+          for i in 1 2 3; do
+            gcloud compute ssh "$VM" --zone="$ZONE" --project="$PROJECT" \
+              --tunnel-through-iap --quiet \
+              --command "sudo systemctl restart onyx" && exit 0
+            echo "ssh attempt $i failed; retrying in 20s"
+            sleep 20
+          done
+          exit 1
+      - name: Health check
+        run: |
+          echo "Waiting for $HEALTH_URL"
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || true)
+            if [ "$code" = "200" ]; then
+              echo "Healthy after $((i*20))s"
+              exit 0
+            fi
+            echo "attempt $i: HTTP $code"
+            sleep 20
+          done
+          echo "Health check failed after 10 minutes"
+          exit 1
