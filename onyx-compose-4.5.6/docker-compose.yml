@@ -42,7 +42,7 @@ services:
   api_server:
     image: ${ONYX_BACKEND_IMAGE:-onyxdotapp/onyx-backend:${IMAGE_TAG:-latest}}
     build:
-      context: ../../backend
+      context: ../backend
       dockerfile: Dockerfile
       # The shipped image; the Dockerfile's default (last) stage is the dev variant
       # with debugging tools (published with a -dev tag suffix).
@@ -124,7 +124,7 @@ services:
   background:
     image: ${ONYX_BACKEND_IMAGE:-onyxdotapp/onyx-backend:${IMAGE_TAG:-latest}}
     build:
-      context: ../../backend
+      context: ../backend
       dockerfile: Dockerfile
       # The shipped image; the Dockerfile's default (last) stage is the dev variant
       # with debugging tools (published with a -dev tag suffix).
@@ -196,7 +196,7 @@ services:
   web_server:
     image: ${ONYX_WEB_SERVER_IMAGE:-onyxdotapp/onyx-web-server:${IMAGE_TAG:-latest}}
     build:
-      context: ../../web
+      context: ../web
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_DISABLE_LOGOUT=${NEXT_PUBLIC_DISABLE_LOGOUT:-}
@@ -231,7 +231,7 @@ services:
   # mcp_server:
   #   image: ${ONYX_BACKEND_IMAGE:-onyxdotapp/onyx-backend:${IMAGE_TAG:-latest}}
   #   build:
-  #     context: ../../backend
+  #     context: ../backend
   #     dockerfile: Dockerfile
   #     target: runtime
   #   command: >
@@ -271,7 +271,7 @@ services:
   inference_model_server:
     image: ${ONYX_MODEL_SERVER_IMAGE:-onyxdotapp/onyx-model-server:${IMAGE_TAG:-latest}}
     build:
-      context: ../../backend
+      context: ../backend
       dockerfile: Dockerfile.model_server
     # GPU Support: Uncomment the following lines to enable GPU support
     # Requires nvidia-container-toolkit to be installed on the host
@@ -314,7 +314,7 @@ services:
   indexing_model_server:
     image: ${ONYX_MODEL_SERVER_IMAGE:-onyxdotapp/onyx-model-server:${IMAGE_TAG:-latest}}
     build:
-      context: ../../backend
+      context: ../backend
       dockerfile: Dockerfile.model_server
     # GPU Support: Uncomment the following lines to enable GPU support
     # Requires nvidia-container-toolkit to be installed on the host
@@ -446,7 +446,7 @@ services:
       # Mount templates read-only; the startup command copies them into
       # the writable /etc/nginx/conf.d/ inside the container.  This avoids
       # "Permission denied" errors on Windows Docker bind mounts.
-      - ../data/nginx:/nginx-templates:ro
+      - ../deployment/data/nginx:/nginx-templates:ro
     # PRODUCTION: Add SSL certificate volumes for HTTPS support:
     #   - ../data/certbot/conf:/etc/letsencrypt
     #   - ../data/certbot/www:/var/www/certbot
