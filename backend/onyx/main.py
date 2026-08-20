@@ -122,6 +122,8 @@ from onyx.server.manage.get_state import router as state_router
 from onyx.server.manage.image_generation.api import (
     admin_router as image_generation_admin_router,
 )
+from onyx.server.manage.line_bot.api import router as line_bot_router
+from onyx.server.manage.line_bot.webhook import router as line_webhook_router
 from onyx.server.manage.llm.api import admin_router as llm_admin_router
 from onyx.server.manage.llm.api import basic_router as llm_router
 from onyx.server.manage.oauth_test import router as oauth_test_admin_router
@@ -131,6 +133,7 @@ from onyx.server.manage.opensearch_migration.api import (
 from onyx.server.manage.search_settings import router as search_settings_router
 from onyx.server.manage.slack_bot import router as slack_bot_management_router
 from onyx.server.manage.sso.api import admin_router as sso_admin_router
+from onyx.server.manage.telegram_bot.api import router as telegram_bot_router
 from onyx.server.manage.tracing.api import admin_router as tracing_admin_router
 from onyx.server.manage.users import router as user_router
 from onyx.server.manage.voice.api import admin_router as voice_admin_router
@@ -552,6 +555,9 @@ def get_application(lifespan_override: Lifespan | None = None) -> FastAPI:
         application, slack_bot_management_router
     )
     include_router_with_global_prefix_prepended(application, discord_bot_router)
+    include_router_with_global_prefix_prepended(application, telegram_bot_router)
+    include_router_with_global_prefix_prepended(application, line_bot_router)
+    include_router_with_global_prefix_prepended(application, line_webhook_router)
     include_router_with_global_prefix_prepended(application, persona_router)
     include_router_with_global_prefix_prepended(application, admin_persona_router)
     include_router_with_global_prefix_prepended(application, agents_router)

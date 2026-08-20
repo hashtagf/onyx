@@ -4483,6 +4483,117 @@ class DiscordChannelConfig(Base):
     )
 
 
+class TelegramBotConfig(Base):
+    """Global Telegram bot configuration (one per tenant).
+
+    Stores the bot token when not provided via TELEGRAM_BOT_TOKEN env var.
+    Uses a fixed ID with check constraint to enforce only one row per tenant.
+    """
+
+    __tablename__ = "telegram_bot_config"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, server_default=text("'SINGLETON'")
+    )
+    bot_token: Mapped[SensitiveValue[str] | None] = mapped_column(
+        EncryptedString(), nullable=False
+    )
+    default_persona_id: Mapped[int | None] = mapped_column(
+        ForeignKey("persona.id", ondelete="SET NULL"), nullable=True
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("true"), nullable=False
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    default_persona: Mapped["Persona | None"] = relationship(
+        "Persona", foreign_keys=[default_persona_id]
+    )
+
+
+class TelegramChatConfig(Base):
+    """Per-chat configuration for the Telegram bot.
+
+    Rows are auto-created (disabled) the first time the bot sees a chat.
+    The admin enables chats in the UI.
+    """
+
+    __tablename__ = "telegram_chat_config"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
+    chat_name: Mapped[str] = mapped_column(String, nullable=False)
+
+    # Telegram chat type: private, group, supergroup, channel
+    chat_type: Mapped[str] = mapped_column(
+        String(20), server_default=text("'private'"), nullable=False
+    )
+
+    # If true (default), bot responds in groups only when @mentioned or replied to.
+    # Private chats always respond when enabled.
+    require_bot_invocation: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("true"), nullable=False
+    )
+
+    persona_override_id: Mapped[int | None] = mapped_column(
+        ForeignKey("persona.id", ondelete="SET NULL"), nullable=True
+    )
+
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
+
+    first_seen_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    persona_override: Mapped["Persona | None"] = relationship()
+
+
+class LineBotConfig(Base):
+    """Global LINE Official Account bot configuration (one per tenant).
+
+    LINE's Messaging API is webhook-only and has no chat listing API, so all
+    behavior is configured globally rather than per chat.
+    """
+
+    __tablename__ = "line_bot_config"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, server_default=text("'SINGLETON'")
+    )
+    channel_access_token: Mapped[SensitiveValue[str] | None] = mapped_column(
+        EncryptedString(), nullable=False
+    )
+    channel_secret: Mapped[SensitiveValue[str] | None] = mapped_column(
+        EncryptedString(), nullable=False
+    )
+    default_persona_id: Mapped[int | None] = mapped_column(
+        ForeignKey("persona.id", ondelete="SET NULL"), nullable=True
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("true"), nullable=False
+    )
+    # Respond to 1:1 chats with the Official Account
+    respond_to_dms: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("true"), nullable=False
+    )
+    # In group/room chats, respond only when the bot is @mentioned
+    require_mention_in_groups: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("true"), nullable=False
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    default_persona: Mapped["Persona | None"] = relationship(
+        "Persona", foreign_keys=[default_persona_id]
+    )
+
+
 class Milestone(Base):
     # This table is used to track significant events for a deployment towards finding value
     # The table is currently not used for features but it may be used in the future to inform

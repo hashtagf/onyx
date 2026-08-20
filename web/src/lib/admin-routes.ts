@@ -37,6 +37,7 @@ import {
   SvgDiscord,
   SvgSlack,
 } from "@opal/icons";
+import { SvgLine, SvgTelegram } from "@opal/logos";
 
 export interface AdminRouteEntry {
   path: string;
@@ -97,6 +98,18 @@ export const ADMIN_ROUTES = {
     icon: SvgDiscord,
     title: "Discord Integration",
     sidebarLabel: "Discord Integration",
+  },
+  TELEGRAM_BOTS: {
+    path: "/admin/telegram-bot",
+    icon: SvgTelegram,
+    title: "Telegram Integration",
+    sidebarLabel: "Telegram Integration",
+  },
+  LINE_BOTS: {
+    path: "/admin/line-bot",
+    icon: SvgLine,
+    title: "LINE Integration",
+    sidebarLabel: "LINE Integration",
   },
   MCP_ACTIONS: {
     path: "/admin/actions/mcp",

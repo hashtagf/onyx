@@ -2133,6 +2133,15 @@ INSTANCE_TYPE = (
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 DISCORD_BOT_INVOKE_CHAR = os.environ.get("DISCORD_BOT_INVOKE_CHAR", "!")
 
+# Telegram bot integration. When set, the token is managed via env and the
+# admin config API is disabled (mirrors DISCORD_BOT_TOKEN).
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+
+# LINE bot integration. When both are set, credentials are managed via env and
+# the admin config API is disabled.
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
+
 
 ## Stripe Configuration
 # URL to fetch the Stripe publishable key from a public S3 bucket.

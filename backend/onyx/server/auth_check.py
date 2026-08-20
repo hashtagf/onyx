@@ -95,6 +95,9 @@ PUBLIC_ENDPOINT_SPECS = [
     # craft webapp proxy — access enforced per-session via sharing_scope in handler
     ("/build/sessions/{session_id}/webapp", {"GET"}),
     ("/build/sessions/{session_id}/webapp/{path:path}", {"GET"}),
+    # LINE Messaging API webhook — authenticated via X-Line-Signature HMAC
+    # verification in the handler, not via a user session
+    ("/line/webhook", {"POST"}),
 ]
 
 
