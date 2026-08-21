@@ -168,13 +168,13 @@ export const OnyxLogoTypeIcon = ({
     <>
       <img
         src="/logotype.png"
-        alt="MSAI"
+        alt="SPIFFAI"
         style={style}
         className={"dark:hidden " + className}
       />
       <img
         src="/logotype-dark.png"
-        alt="MSAI"
+        alt="SPIFFAI"
         style={style}
         className={"hidden dark:block " + className}
       />

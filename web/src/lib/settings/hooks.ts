@@ -102,7 +102,7 @@ export function useSettings(): AppSettings {
   return {
     ...core,
     enterprise: enterprise ?? null,
-    appName: enterprise?.application_name?.trim() || "MSAI",
+    appName: enterprise?.application_name?.trim() || "SPIFFAI",
     logoUrl: enterprise?.use_custom_logo
       ? `/api/enterprise-settings/logo?v=${logoBuster}`
       : null,
