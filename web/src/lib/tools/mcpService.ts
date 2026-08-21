@@ -169,6 +169,25 @@ export async function updateMCPServerStatus(
   }
 }
 
+export async function setMCPCredentialMode(
+  serverId: number,
+  mode: "shared" | "per_user"
+): Promise<void> {
+  const response = await fetch(
+    `/api/admin/mcp/server/${serverId}/credential-mode`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(error?.detail || "Failed to update credential mode");
+  }
+}
+
 interface UpsertMCPServerResponse {
   server_id: number;
   server_name: string;

@@ -17,7 +17,12 @@ import {
   ToolSnapshot,
   MCPServerStatus,
   MCPServer,
+  MCPAuthenticationType,
+  MCPAuthenticationPerformer,
 } from "@/lib/tools/interfaces";
+import { setMCPCredentialMode } from "@/lib/tools/mcpService";
+import { Switch } from "@opal/components";
+import { toast } from "@opal/layouts";
 import useServerTools from "@/hooks/useServerTools";
 import { KeyedMutator } from "swr";
 import type { IconProps } from "@opal/types";
@@ -79,6 +84,9 @@ export interface MCPActionCardProps {
     mutate: KeyedMutator<ToolSnapshot[]>
   ) => void;
 
+  // Called after the server row itself changed (e.g. credential mode)
+  onServerUpdated?: () => void;
+
   // Optional styling
   className?: string;
 }
@@ -103,6 +111,7 @@ export default function MCPActionCard({
   onToolToggle,
   onRefreshTools,
   onUpdateToolsStatus,
+  onServerUpdated,
   className,
 }: MCPActionCardProps) {
   const [isToolsExpanded, setIsToolsExpanded] = useState(initialExpanded);
@@ -237,6 +246,34 @@ export default function MCPActionCard({
     }
   };
 
+  const [isSwitchingMode, setIsSwitchingMode] = useState(false);
+  const isSharedCredential =
+    server.auth_performer === MCPAuthenticationPerformer.ADMIN;
+  const supportsSharedCredential =
+    server.auth_type === MCPAuthenticationType.OAUTH ||
+    server.auth_type === MCPAuthenticationType.API_TOKEN;
+
+  const handleCredentialModeToggle = async (shared: boolean) => {
+    setIsSwitchingMode(true);
+    try {
+      await setMCPCredentialMode(serverId, shared ? "shared" : "per_user");
+      toast.success(
+        shared
+          ? "Shared credential enabled — everyone (including bots) now uses your connection"
+          : "Switched back to per-user credentials"
+      );
+      onServerUpdated?.();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to update credential mode"
+      );
+    } finally {
+      setIsSwitchingMode(false);
+    }
+  };
+
   const handleRefreshTools = () => {
     setIsToolsRefreshing(true);
     onRefreshTools?.(serverId, mutate);
@@ -292,6 +329,25 @@ export default function MCPActionCard({
         className={className}
         ariaLabel={`${title} MCP server card`}
       >
+        {supportsSharedCredential && (
+          <div className="flex items-center justify-between gap-2 px-3 py-2">
+            <div className="flex flex-col">
+              <Text text04 mainUiBody>
+                Shared credential
+              </Text>
+              <Text text03 secondaryBody>
+                Everyone — including bots and the chat widget — uses one
+                admin-connected credential. Authenticate first, then turn this
+                on.
+              </Text>
+            </div>
+            <Switch
+              checked={isSharedCredential}
+              onCheckedChange={handleCredentialModeToggle}
+              disabled={isSwitchingMode}
+            />
+          </div>
+        )}
         <ToolsList
           isFetching={
             server.status === MCPServerStatus.FETCHING_TOOLS || isLoading

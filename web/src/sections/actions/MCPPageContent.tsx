@@ -529,6 +529,7 @@ export default function MCPPageContent() {
                   onToolToggle={handleToolToggle}
                   onRefreshTools={handleRefreshTools}
                   onUpdateToolsStatus={handleUpdateToolsStatus}
+                  onServerUpdated={() => mutateMcpServers()}
                 />
               );
             })

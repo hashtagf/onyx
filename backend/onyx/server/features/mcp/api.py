@@ -2667,3 +2667,53 @@ def delete_mcp_server_admin(
     except Exception as e:
         logger.error("Failed to delete MCP server %s: %s", server_id, e)
         raise HTTPException(status_code=500, detail="Failed to delete MCP server")
+
+
+class MCPCredentialModeRequest(BaseModel):
+    """Switch a server between per-user and shared (admin) credentials."""
+
+    mode: str  # "shared" | "per_user"
+
+
+@admin_router.post("/server/{server_id}/credential-mode")
+def set_mcp_credential_mode(
+    server_id: int,
+    request: MCPCredentialModeRequest,
+    db_session: Session = Depends(get_session),
+    user: User = Depends(current_curator_or_admin_user),
+) -> dict[str, str]:
+    """Toggle shared-credential mode for an MCP server.
+
+    "shared" sets the server to admin-performed auth so every user — including
+    bot service accounts and the chat widget — resolves the same credential.
+    If the caller has connected their own credential to this server, it is
+    promoted to the shared slot (the flow: connect via the normal per-user
+    OAuth, then flip to shared).
+    """
+    try:
+        mcp_server = get_mcp_server_by_id(server_id, db_session)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+
+    _ensure_mcp_server_owner_or_admin(mcp_server, user)
+
+    if request.mode == "per_user":
+        mcp_server.auth_performer = MCPAuthenticationPerformer.PER_USER
+    elif request.mode == "shared":
+        user_config = get_user_connection_config(mcp_server.id, user.email, db_session)
+        if user_config is not None:
+            mcp_server.admin_connection_config_id = user_config.id
+        elif mcp_server.admin_connection_config_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Connect your own credential to this server first "
+                    "(Authenticate), then switch to shared."
+                ),
+            )
+        mcp_server.auth_performer = MCPAuthenticationPerformer.ADMIN
+    else:
+        raise HTTPException(status_code=400, detail="mode must be shared or per_user")
+
+    db_session.commit()
+    return {"mode": request.mode}
