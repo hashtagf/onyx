@@ -2,7 +2,7 @@ import type { IconProps } from "@opal/types";
 
 // SPIFFAI white-label wordmark. The original "onyx" glyphs were an SVG sized
 // by a 64-unit-high viewBox; match that visual height with the SPIFF image.
-const SvgOnyxTyped = ({ size, className }: IconProps) => (
+const SvgOnyxTyped = ({ size, className, style }: IconProps) => (
   <img
     src="/logotype.png"
     alt="SPIFFAI"
@@ -12,6 +12,7 @@ const SvgOnyxTyped = ({ size, className }: IconProps) => (
       objectFit: "contain",
       flexShrink: 0,
       userSelect: "none",
+      ...style,
     }}
     className={className}
   />
