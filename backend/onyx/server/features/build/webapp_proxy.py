@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import AsyncGenerator
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qsl, urlencode
 from uuid import UUID
 
@@ -18,6 +18,7 @@ from fastapi import (
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi_users.authentication.strategy.base import Strategy
 from fastapi_users.manager import BaseUserManager
+from sqlalchemy.orm import Session
 from starlette.websockets import WebSocketState
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as websocket_connect
@@ -33,9 +34,15 @@ from onyx.auth.users import (
 from onyx.cache.factory import get_cache_backend
 from onyx.configs.app_configs import WEB_DOMAIN
 from onyx.configs.constants import FASTAPI_USERS_AUTH_COOKIE_NAME
+from onyx.db.artifact import (
+    get_artifact_publication_access,
+    get_artifact_publication_file,
+)
 from onyx.db.engine.async_sql_engine import get_async_session_context_manager
+from onyx.db.engine.sql_engine import get_session
 from onyx.db.enums import Permission, SharingScope
 from onyx.db.models import User
+from onyx.file_store.file_store import get_default_file_store
 from onyx.server.features.build.db.build_session import (
     get_webapp_access_async,
     get_webapp_target_async,
@@ -355,33 +362,62 @@ async def _proxy_webapp_hmr_websocket(session_id: UUID, websocket: WebSocket) ->
             await websocket.close(code=1011)
 
 
-async def _check_webapp_access(session_id: UUID, user: User | None) -> None:
+async def _check_webapp_access(session_id: UUID, user: User | None) -> SharingScope:
     # Only grants are cached — a 404 (missing session) must still beat 401 (unauth).
     cache = get_cache_backend()
-    if user is not None and cache.get(_webapp_access_cache_key(session_id, user.id)):
-        return
+    if user is not None:
+        cached_scope = cache.get(_webapp_access_cache_key(session_id, user.id))
+        if cached_scope:
+            try:
+                return SharingScope(cached_scope.decode())
+            except ValueError:
+                # Ignore entries written by an older server version.
+                cache.delete(_webapp_access_cache_key(session_id, user.id))
 
     async with get_async_session_context_manager() as db_session:
         access = await get_webapp_access_async(db_session, session_id)
 
     if access is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    sharing_scope, owner_id = access
+    if sharing_scope == SharingScope.PUBLIC:
+        if user is None:
+            return sharing_scope
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
-    sharing_scope, owner_id = access
     if sharing_scope == SharingScope.PRIVATE and owner_id != user.id:
         raise HTTPException(status_code=404, detail="Session not found")
 
     cache.set(
-        _webapp_access_cache_key(session_id, user.id), b"1", ex=_WEBAPP_ACCESS_TTL
+        _webapp_access_cache_key(session_id, user.id),
+        sharing_scope.value,
+        ex=_WEBAPP_ACCESS_TTL,
     )
+    return sharing_scope
 
 
 _OFFLINE_HTML = (_TEMPLATES_DIR / "webapp_offline.html").read_text()
+_PUBLIC_HTML_CSP = (
+    "sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads; "
+    "object-src 'none'; base-uri 'none'"
+)
 
 
 def _offline_html_response() -> Response:
     return Response(content=_OFFLINE_HTML, status_code=503, media_type="text/html")
+
+
+def _apply_public_html_security_headers(response: Response) -> Response:
+    """Isolate public generated HTML from the authenticated Onyx origin."""
+    content_type = response.headers.get("content-type", "").lower()
+    if content_type.startswith("text/html"):
+        response.headers["Content-Security-Policy"] = _PUBLIC_HTML_CSP
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=()"
+        )
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 # Router for the webapp proxy. The route is exempted from the global auth
@@ -390,6 +426,53 @@ def _offline_html_response() -> Response:
 # instead of a bare 401. Auth is enforced inside the handler via
 # _check_webapp_access; never wire a handler here that doesn't enforce it.
 public_build_router = APIRouter(prefix="/build")
+
+
+@public_build_router.get("/artifacts/{publication_id}", response_model=None)
+@public_build_router.get("/artifacts/{publication_id}/{path:path}", response_model=None)
+def get_published_artifact(
+    publication_id: UUID,
+    path: str = "",
+    user: User | None = Depends(optional_user),
+    db_session: Session = Depends(get_session),
+) -> Response:
+    access = get_artifact_publication_access(publication_id, db_session)
+    if access is None or access[0].revoked_at is not None:
+        raise HTTPException(status_code=404, detail="Artifact publication not found")
+    publication, owner_id = access
+    if publication.visibility != SharingScope.PUBLIC:
+        if user is None:
+            return RedirectResponse(url="/auth/login", status_code=302)
+        if publication.visibility == SharingScope.PRIVATE and user.id != owner_id:
+            raise HTTPException(
+                status_code=404, detail="Artifact publication not found"
+            )
+
+    requested_path = path or "index.html"
+    parsed_path = PurePosixPath(requested_path)
+    if parsed_path.is_absolute() or ".." in parsed_path.parts:
+        raise HTTPException(status_code=404, detail="Artifact file not found")
+    normalized_path = str(parsed_path)
+    publication_file = get_artifact_publication_file(
+        publication_id, normalized_path, db_session
+    )
+    if publication_file is None and not PurePosixPath(normalized_path).suffix:
+        publication_file = get_artifact_publication_file(
+            publication_id, f"{normalized_path.rstrip('/')}/index.html", db_session
+        )
+    if publication_file is None:
+        raise HTTPException(status_code=404, detail="Artifact file not found")
+
+    content = (
+        get_default_file_store().read_file(publication_file.storage_file_id).read()
+    )
+    response = Response(content=content, media_type=publication_file.mime_type)
+    if publication_file.mime_type.startswith("text/html"):
+        response.headers["Cache-Control"] = "no-store"
+        return _apply_public_html_security_headers(response)
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @public_build_router.get("/sessions/{session_id}/webapp", response_model=None)
@@ -403,19 +486,23 @@ async def get_webapp(
     user: User | None = Depends(optional_user),
 ) -> StreamingResponse | Response:
     try:
-        await _check_webapp_access(session_id, user)
+        sharing_scope = await _check_webapp_access(session_id, user)
     except HTTPException as e:
         if e.status_code == 401:
             return RedirectResponse(url="/auth/login", status_code=302)
         raise
     try:
-        return await _proxy_request(path, request, session_id)
+        response = await _proxy_request(path, request, session_id)
     except HTTPException as e:
         if e.status_code in (502, 503, 504):
             # Cached URL may point at a dead/recreated pod; drop it to force re-resolve.
             get_cache_backend().delete(_sandbox_url_cache_key(session_id))
-            return _offline_html_response()
-        raise
+            response = _offline_html_response()
+        else:
+            raise
+    if sharing_scope == SharingScope.PUBLIC:
+        return _apply_public_html_security_headers(response)
+    return response
 
 
 @public_build_router.websocket("/sessions/{session_id}/webapp/_next/webpack-hmr")

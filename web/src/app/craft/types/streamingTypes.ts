@@ -2,7 +2,16 @@
 // Sharing Types
 // =============================================================================
 
-export type SharingScope = "private" | "public_org";
+export type SharingScope = "private" | "public_org" | "public";
+
+export interface ArtifactPublication {
+  id: string;
+  version: number;
+  visibility: SharingScope;
+  url: string;
+  content_hash: string;
+  created_at: string;
+}
 
 export type SessionOrigin = "INTERACTIVE" | "SCHEDULED" | "SLACK";
 

@@ -505,7 +505,7 @@ def list_artifacts(
     session_id: UUID,
     user: User = Depends(require_permission(Permission.BASIC_ACCESS)),
     db_session: Session = Depends(get_session),
-) -> list[dict]:
+) -> list[ArtifactResponse]:
     """List artifacts generated in the session."""
     user_id: UUID = user.id
     session_manager = SessionManager(db_session)
@@ -514,7 +514,7 @@ def list_artifacts(
     if artifacts is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    return artifacts
+    return [ArtifactResponse.from_model(artifact) for artifact in artifacts]
 
 
 @router.get("/{session_id}/files", response_model=DirectoryListing)

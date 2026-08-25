@@ -159,6 +159,8 @@ export const SWR_KEYS = {
     `/api/build/sessions/${sessionId}/webapp-info`,
   buildSessionArtifacts: (sessionId: string) =>
     `/api/build/sessions/${sessionId}/artifacts`,
+  buildSessionArtifactPublication: (sessionId: string) =>
+    `/api/build/sessions/${sessionId}/artifact-publications/latest`,
   buildSessionArtifactFile: (sessionId: string, filePath: string) =>
     `/api/build/sessions/${sessionId}/artifacts/${filePath}`,
   buildSessionPptxPreview: (sessionId: string, filePath: string) =>

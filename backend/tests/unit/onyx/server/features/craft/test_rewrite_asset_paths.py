@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import AsyncGenerator, AsyncIterator
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -9,7 +10,7 @@ from uuid import UUID
 
 import httpx
 import pytest
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Response
 from starlette.responses import StreamingResponse
 
 from onyx.db.enums import SharingScope
@@ -524,6 +525,49 @@ class _FakeCacheBackend:
 
 class TestWebappAccessCache:
     @pytest.mark.asyncio
+    async def test_public_session_allows_unauthenticated_viewer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        owner_id = UUID("22222222-2222-2222-2222-222222222222")
+
+        async def fake_access(
+            _db: object, _sid: UUID
+        ) -> tuple[SharingScope, UUID] | None:
+            return (SharingScope.PUBLIC, owner_id)
+
+        monkeypatch.setattr(api, "get_webapp_access_async", fake_access)
+        monkeypatch.setattr(
+            api, "get_async_session_context_manager", lambda: _FakeACM()
+        )
+        monkeypatch.setattr(api, "get_cache_backend", lambda: _FakeCacheBackend())
+
+        scope = await api._check_webapp_access(UUID(SESSION_ID), None)
+
+        assert scope == SharingScope.PUBLIC
+
+    @pytest.mark.asyncio
+    async def test_organization_session_requires_authentication(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        owner_id = UUID("22222222-2222-2222-2222-222222222222")
+
+        async def fake_access(
+            _db: object, _sid: UUID
+        ) -> tuple[SharingScope, UUID] | None:
+            return (SharingScope.PUBLIC_ORG, owner_id)
+
+        monkeypatch.setattr(api, "get_webapp_access_async", fake_access)
+        monkeypatch.setattr(
+            api, "get_async_session_context_manager", lambda: _FakeACM()
+        )
+        monkeypatch.setattr(api, "get_cache_backend", lambda: _FakeCacheBackend())
+
+        with pytest.raises(HTTPException) as exc:
+            await api._check_webapp_access(UUID(SESSION_ID), None)
+
+        assert exc.value.status_code == 401
+
+    @pytest.mark.asyncio
     async def test_grant_is_cached_skipping_db_on_repeat(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -581,3 +625,86 @@ class TestWebappAccessCache:
             assert exc.value.status_code == 404
 
         assert calls["n"] == 2  # denial hit the DB both times
+
+
+def test_public_html_security_headers_isolate_generated_code() -> None:
+    response = api._apply_public_html_security_headers(
+        Response(content="<html></html>", media_type="text/html")
+    )
+
+    assert response.headers["content-security-policy"].startswith("sandbox ")
+    assert "allow-same-origin" not in response.headers["content-security-policy"]
+    assert response.headers["permissions-policy"] == (
+        "camera=(), microphone=(), geolocation=()"
+    )
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_public_asset_security_headers_do_not_modify_non_html() -> None:
+    response = api._apply_public_html_security_headers(
+        Response(content="body {}", media_type="text/css")
+    )
+
+    assert "content-security-policy" not in response.headers
+
+
+def test_published_html_is_served_from_storage_with_isolation_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publication_id = UUID(SESSION_ID)
+    publication = SimpleNamespace(
+        revoked_at=None,
+        visibility=SharingScope.PUBLIC,
+    )
+    publication_file = SimpleNamespace(
+        storage_file_id="stored-index",
+        mime_type="text/html",
+    )
+    file_store = SimpleNamespace(
+        read_file=lambda _file_id: BytesIO(b"<html>published</html>")
+    )
+    monkeypatch.setattr(
+        api,
+        "get_artifact_publication_access",
+        lambda _publication_id, _db: (publication, UUID(int=1)),
+    )
+    monkeypatch.setattr(
+        api,
+        "get_artifact_publication_file",
+        lambda _publication_id, _path, _db: publication_file,
+    )
+    monkeypatch.setattr(api, "get_default_file_store", lambda: file_store)
+
+    response = api.get_published_artifact(
+        publication_id=publication_id,
+        user=None,
+        db_session=cast(api.Session, None),
+    )
+
+    assert response.body == b"<html>published</html>"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["content-security-policy"].startswith("sandbox ")
+
+
+def test_organization_publication_redirects_anonymous_viewer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publication = SimpleNamespace(
+        revoked_at=None,
+        visibility=SharingScope.PUBLIC_ORG,
+    )
+    monkeypatch.setattr(
+        api,
+        "get_artifact_publication_access",
+        lambda _publication_id, _db: (publication, UUID(int=1)),
+    )
+
+    response = api.get_published_artifact(
+        publication_id=UUID(SESSION_ID),
+        user=None,
+        db_session=cast(api.Session, None),
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/auth/login"

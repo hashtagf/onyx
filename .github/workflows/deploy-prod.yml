@@ -27,10 +27,12 @@ on:
         description: "Build web image"
         type: boolean
         default: true
+      build_sandbox:
+        description: "Build Craft sandbox image"
+        type: boolean
+        default: true
 
-permissions:
-  id-token: write
-  contents: read
+permissions: {}
 
 concurrency:
   group: deploy-prod
@@ -49,12 +51,17 @@ env:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       web: ${{ steps.filter.outputs.web }}
+      sandbox: ${{ steps.filter.outputs.sandbox }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706
         id: filter
         with:
           filters: |
@@ -62,6 +69,8 @@ jobs:
               - "backend/**"
             web:
               - "web/**"
+            sandbox:
+              - "backend/onyx/server/features/build/sandbox/image/**"
 
   build-backend:
     needs: changes
@@ -69,13 +78,18 @@ jobs:
       (github.event_name == 'push' && needs.changes.outputs.backend == 'true') ||
       (github.event_name == 'workflow_dispatch' && inputs.build_backend)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: google-github-actions/auth@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
       - name: Build backend image on Cloud Build
         run: |
           TAG="msai-$(git rev-parse --short HEAD)"
@@ -111,13 +125,18 @@ jobs:
       (github.event_name == 'push' && needs.changes.outputs.web == 'true') ||
       (github.event_name == 'workflow_dispatch' && inputs.build_web)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: google-github-actions/auth@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
       - name: Build web image on Cloud Build
         run: |
           TAG="msai-$(git rev-parse --short HEAD)"
@@ -144,20 +163,66 @@ jobs:
             sleep 30
           done
 
+  build-sandbox:
+    needs: changes
+    if: >
+      (github.event_name == 'push' && needs.changes.outputs.sandbox == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_sandbox)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Build sandbox image on Cloud Build
+        run: |
+          TAG="msai-$(git rev-parse --short HEAD)"
+          BUILD_ID=$(gcloud builds submit backend/onyx/server/features/build/sandbox/image --async \
+            --project="$PROJECT" --region="$REGION" \
+            --machine-type=e2-highcpu-8 --timeout=3600s \
+            --format="value(id)" \
+            --config=/dev/stdin <<EOF
+          steps:
+          - name: gcr.io/cloud-builders/docker
+            env: [DOCKER_BUILDKIT=1]
+            args: [build, -t, $GAR/onyx-sandbox:$TAG, -t, $GAR/onyx-sandbox:prod, .]
+          images: [$GAR/onyx-sandbox:$TAG, $GAR/onyx-sandbox:prod]
+          EOF
+          )
+          echo "Build: https://console.cloud.google.com/cloud-build/builds;region=$REGION/$BUILD_ID?project=$PROJECT"
+          while :; do
+            STATUS=$(gcloud builds describe "$BUILD_ID" --project="$PROJECT" --region="$REGION" --format="value(status)")
+            echo "status: $STATUS"
+            case "$STATUS" in
+              SUCCESS) exit 0 ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED) exit 1 ;;
+            esac
+            sleep 30
+          done
+
   deploy:
-    needs: [build-backend, build-web]
+    needs: [build-backend, build-web, build-sandbox]
     # Run when at least one build succeeded and none failed (a skipped build
     # job is fine — only that half changed).
     if: >
       !cancelled() && !contains(needs.*.result, 'failure') &&
       contains(needs.*.result, 'success')
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     steps:
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
       - name: Restart onyx stack (re-pulls :prod images)
         run: |
           # First OS Login connection can race key propagation; retry.

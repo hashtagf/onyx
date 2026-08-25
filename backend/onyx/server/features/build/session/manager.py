@@ -10,7 +10,6 @@ import io
 import json
 import mimetypes
 import threading
-import uuid
 import zipfile
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, nullcontext
@@ -25,10 +24,11 @@ from sqlalchemy.orm import Session as DBSession
 from onyx.cache.factory import get_cache_backend
 from onyx.configs.app_configs import WEB_DOMAIN
 from onyx.configs.constants import MessageType
+from onyx.db.artifact import get_or_create_webapp_artifact
 from onyx.db.enums import BuildSessionStatus, SandboxStatus, SessionOrigin
 from onyx.db.external_app import get_connectable_apps_for_user
 from onyx.db.llm import fetch_all_accessible_llm_providers
-from onyx.db.models import BuildMessage, BuildSession, Sandbox, User
+from onyx.db.models import Artifact, BuildMessage, BuildSession, Sandbox, User
 from onyx.db.users import fetch_user_by_id
 from onyx.error_handling.error_codes import OnyxErrorCode
 from onyx.error_handling.exceptions import OnyxError
@@ -110,6 +110,8 @@ from shared_configs.contextvars import get_current_tenant_id
 logger = setup_logger()
 
 _DISPOSE_PENDING_TTL_SECONDS = 24 * 3600
+_MAX_PUBLICATION_FILE_COUNT = 500
+_MAX_PUBLICATION_SIZE_BYTES = 50 * 1024 * 1024
 
 
 def _dispose_pending_key(session_id: UUID) -> str:
@@ -1276,7 +1278,7 @@ class SessionManager:
         self,
         session_id: UUID,
         user_id: UUID,
-    ) -> list[dict[str, Any]] | None:
+    ) -> list[Artifact] | None:
         """
         List artifacts generated in a session.
 
@@ -1294,8 +1296,7 @@ class SessionManager:
             return None
         _, sandbox = resolved
 
-        artifacts: list[dict[str, Any]] = []
-        now = datetime.now(timezone.utc)
+        artifacts: list[Artifact] = []
 
         try:
             output_entries = self._sandbox_manager.list_directory(
@@ -1322,19 +1323,46 @@ class SessionManager:
 
         if has_webapp:
             artifacts.append(
-                {
-                    "id": str(uuid.uuid4()),
-                    "session_id": str(session_id),
-                    "type": "web_app",  # Use web_app to match streaming packet type
-                    "name": "Web Application",
-                    "path": "outputs/web",
-                    "preview_url": None,  # Preview is via webapp URL, not artifact preview
-                    "created_at": now.isoformat(),
-                    "updated_at": now.isoformat(),
-                }
+                get_or_create_webapp_artifact(session_id, self._db_session)
             )
 
         return artifacts
+
+    def build_static_webapp_files(
+        self, session_id: UUID, user_id: UUID, publication_id: UUID
+    ) -> list[tuple[str, bytes]]:
+        resolved = self._resolve_owned_session_and_sandbox(session_id, user_id)
+        if resolved is None:
+            raise ValueError("Session not found")
+        _, sandbox = resolved
+        public_base_path = f"/api/build/artifacts/{publication_id}"
+        self._sandbox_manager.build_static_webapp(
+            sandbox.id, session_id, public_base_path
+        )
+
+        base_dir = "outputs/web/out"
+        paths = self._walk_sandbox_dir(
+            sandbox.id,
+            session_id,
+            base_dir,
+            arcname_for=lambda path: path[len(base_dir) + 1 :],
+        )
+        if not paths or not any(path == "index.html" for _, path in paths):
+            raise RuntimeError("Static build did not produce index.html")
+        if len(paths) > _MAX_PUBLICATION_FILE_COUNT:
+            raise ValueError("Static artifact has too many files")
+
+        files: list[tuple[str, bytes]] = []
+        total_size = 0
+        for workspace_path, published_path in paths:
+            content = self._sandbox_manager.read_file(
+                sandbox.id, session_id, workspace_path
+            )
+            total_size += len(content)
+            if total_size > _MAX_PUBLICATION_SIZE_BYTES:
+                raise ValueError("Static artifact exceeds the 50 MB limit")
+            files.append((published_path, content))
+        return files
 
     def download_artifact(
         self,

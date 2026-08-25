@@ -378,6 +378,7 @@ class SessionOrigin(str, PyEnum):
 class SharingScope(str, PyEnum):
     PRIVATE = "private"
     PUBLIC_ORG = "public_org"
+    PUBLIC = "public"
 
 
 class ApprovalDecision(str, PyEnum):

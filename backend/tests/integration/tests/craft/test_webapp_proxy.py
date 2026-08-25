@@ -82,6 +82,24 @@ def test_proxy_rejects_forged_auth_cookie(
         assert response.status_code == 401
 
 
+def test_public_proxy_allows_unauthenticated_viewer(
+    shared_session: SharedSession,
+) -> None:
+    """A public share reaches the app without an Onyx login."""
+    owner, session_id = shared_session
+    _set_scope(owner, session_id, SharingScope.PUBLIC)
+
+    response = _unauth_get(session_id, follow_redirects=False)
+
+    # The headless fixture has no webapp port. Reaching the branded offline
+    # response proves that access passed without an authentication redirect.
+    assert response.status_code == 503
+    assert "text/html" in response.headers.get("content-type", "").lower()
+    assert "Craft" in response.text
+    assert response.headers["content-security-policy"].startswith("sandbox ")
+    assert "allow-same-origin" not in response.headers["content-security-policy"]
+
+
 def test_proxy_no_webapp_port_renders_branded_offline_page(
     shared_session: SharedSession,
 ) -> None:

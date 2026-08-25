@@ -614,6 +614,12 @@ class StubSandboxManager(SandboxManager):
             raise _not_configured("read_file")
         return self.read_file_returns
 
+    def build_static_webapp(
+        self, sandbox_id: UUID, session_id: UUID, public_base_path: str
+    ) -> None:
+        del sandbox_id, session_id, public_base_path
+        raise _not_configured("build_static_webapp")
+
     def upload_file(
         self,
         sandbox_id: UUID,

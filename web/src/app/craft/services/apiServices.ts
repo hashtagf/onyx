@@ -14,6 +14,7 @@ import {
   DirectoryListing,
   SharingScope,
   ApiSessionSkillsState,
+  ArtifactPublication,
 } from "@/app/craft/types/streamingTypes";
 import {
   ApprovalListResponse,
@@ -232,6 +233,48 @@ export async function setSessionSharing(
   }
 
   return res.json();
+}
+
+export async function fetchLatestArtifactPublication(
+  sessionId: string
+): Promise<ArtifactPublication | null> {
+  const res = await fetch(
+    `${BUILD_API_BASE}/sessions/${sessionId}/artifact-publications/latest`
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch artifact publication: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function publishArtifact(
+  sessionId: string
+): Promise<ArtifactPublication> {
+  const res = await fetch(
+    `${BUILD_API_BASE}/sessions/${sessionId}/artifact-publications`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visibility: "public" }),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to publish artifact: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function revokeArtifactPublication(
+  sessionId: string,
+  publicationId: string
+): Promise<void> {
+  const res = await fetch(
+    `${BUILD_API_BASE}/sessions/${sessionId}/artifact-publications/${publicationId}`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to revoke artifact publication: ${res.status}`);
+  }
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {

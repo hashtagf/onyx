@@ -18,6 +18,12 @@ const allowedDevOrigins = (process.env.ONYX_WEBAPP_ALLOWED_DEV_ORIGINS || "")
 
 const nextConfig: NextConfig = {};
 
+if (process.env.ONYX_STATIC_EXPORT === "1") {
+  nextConfig.output = "export";
+  nextConfig.trailingSlash = true;
+  nextConfig.images = { unoptimized: true };
+}
+
 if (webappBasePath) {
   nextConfig.basePath = webappBasePath;
   nextConfig.assetPrefix = webappBasePath;

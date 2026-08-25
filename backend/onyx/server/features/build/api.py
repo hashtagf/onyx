@@ -6,6 +6,7 @@ from onyx.db.models import User
 from onyx.error_handling.error_codes import OnyxErrorCode
 from onyx.error_handling.exceptions import OnyxError
 from onyx.server.features.build.approvals.api import router as approvals_router
+from onyx.server.features.build.artifacts.api import router as artifacts_router
 from onyx.server.features.build.debug import router as debug_router
 from onyx.server.features.build.external_apps.api import (
     admin_router as external_apps_admin_router,
@@ -67,6 +68,7 @@ def get_base_instructions(
 
 
 router.include_router(sessions_router, tags=["build"])
+router.include_router(artifacts_router, tags=["build"])
 router.include_router(messages_router, tags=["build"])
 router.include_router(turns_router, tags=["build"])
 router.include_router(user_library_router, tags=["build"])

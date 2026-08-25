@@ -18,6 +18,10 @@ describe("UrlBar", () => {
     (copyText as jest.Mock).mockResolvedValue(undefined);
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   test("shows and disables a spinner while refreshing", () => {
     const onRefresh = jest.fn();
     render(
@@ -106,6 +110,61 @@ describe("UrlBar", () => {
       );
     });
     expect(screen.queryByText("Copied URL")).not.toBeInTheDocument();
+  });
+
+  test("offers an unauthenticated public sharing scope", async () => {
+    const user = setupUser();
+    const previewUrl =
+      "https://onyx.example/api/build/sessions/session-1/webapp";
+    const fetchMock = jest.spyOn(global, "fetch").mockImplementation(
+      async (_input, init) =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () =>
+            init?.method === "POST"
+              ? {
+                  id: "publication-1",
+                  version: 1,
+                  visibility: "public",
+                  url: "https://onyx.example/api/build/artifacts/publication-1",
+                  content_hash: "abc123",
+                  created_at: "2026-08-25T00:00:00Z",
+                }
+              : null,
+        }) as Response
+    );
+
+    render(
+      <UrlBar
+        displayUrl={previewUrl}
+        previewUrl={previewUrl}
+        sessionId="session-1"
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Share webapp" }));
+
+    expect(screen.getByText("Private")).toBeInTheDocument();
+    expect(screen.getByText("Organization")).toBeInTheDocument();
+    expect(screen.getByText("Anyone with the link")).toBeInTheDocument();
+    expect(
+      screen.getByText("No Onyx account is required.")
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByText("Anyone with the link").closest('[role="button"]')!
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/build/sessions/session-1/artifact-publications",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ visibility: "public" }),
+        })
+      );
+    });
   });
 
   test("resets copy feedback when the displayed URL changes", async () => {

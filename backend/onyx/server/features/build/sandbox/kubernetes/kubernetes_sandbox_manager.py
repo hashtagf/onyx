@@ -2093,6 +2093,36 @@ fi
         except ApiException as e:
             raise RuntimeError(f"Failed to read file: {e}") from e
 
+    def build_static_webapp(
+        self, sandbox_id: UUID, session_id: UUID, public_base_path: str
+    ) -> None:
+        if not re.fullmatch(r"/api/build/artifacts/[0-9a-f-]+", public_base_path):
+            raise ValueError("Invalid artifact publication base path")
+        pod_name = self._get_pod_name(str(sandbox_id))
+        web_dir = f"/workspace/sessions/{session_id}/outputs/web"
+        script = (
+            f"cd {shlex.quote(web_dir)} && rm -rf out && "
+            f"ONYX_WEBAPP_BASE_PATH={shlex.quote(public_base_path)} "
+            "ONYX_STATIC_EXPORT=1 bun run build && "
+            "test -f out/index.html && echo STATIC_BUILD_OK"
+        )
+        try:
+            response = k8s_stream(
+                self._stream_core_api.connect_get_namespaced_pod_exec,
+                name=pod_name,
+                namespace=self._namespace,
+                container=_SANDBOX_CONTAINER_NAME,
+                command=["/bin/sh", "-c", script],
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+            )
+        except ApiException as e:
+            raise RuntimeError(f"Static webapp build failed: {e}") from e
+        if "STATIC_BUILD_OK" not in response:
+            raise RuntimeError(f"Static webapp build failed: {response[-2000:]}")
+
     def get_webapp_url(self, sandbox_id: UUID, port: int) -> str:
         """Get the webapp URL for a session's Next.js server.
 

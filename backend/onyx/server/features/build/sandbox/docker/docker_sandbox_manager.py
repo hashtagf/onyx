@@ -1690,6 +1690,27 @@ fi
         except binascii.Error as e:
             raise RuntimeError(f"Failed to decode file content: {e}") from e
 
+    def build_static_webapp(
+        self, sandbox_id: UUID, session_id: UUID, public_base_path: str
+    ) -> None:
+        if not re.fullmatch(r"/api/build/artifacts/[0-9a-f-]+", public_base_path):
+            raise ValueError("Invalid artifact publication base path")
+        container = self._require_container(sandbox_id)
+        web_dir = f"{SESSIONS_ROOT}/{session_id}/outputs/web"
+        script = (
+            "set -e\n"
+            "rm -rf out\n"
+            f"ONYX_WEBAPP_BASE_PATH={shlex.quote(public_base_path)} "
+            "ONYX_STATIC_EXPORT=1 bun run build\n"
+            "test -f out/index.html\n"
+        )
+        try:
+            _run_in_container_as_sandbox_user(
+                container, ["/bin/sh", "-c", script], workdir=web_dir
+            )
+        except ExecError as e:
+            raise RuntimeError(f"Static webapp build failed: {e}") from e
+
     def upload_file(
         self,
         sandbox_id: UUID,

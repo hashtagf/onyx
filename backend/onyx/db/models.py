@@ -6263,7 +6263,12 @@ class BuildSession(Base):
     )
     nextjs_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sharing_scope: Mapped[SharingScope] = mapped_column(
-        String,
+        Enum(
+            SharingScope,
+            native_enum=False,
+            name="sharing_scope",
+            values_callable=lambda enum: [member.value for member in enum],
+        ),
         nullable=False,
         default=SharingScope.PRIVATE,
         server_default="private",
@@ -6415,10 +6420,84 @@ class Artifact(Base):
     session: Mapped[BuildSession] = relationship(
         "BuildSession", back_populates="artifacts"
     )
+    publications: Mapped[list["ArtifactPublication"]] = relationship(
+        "ArtifactPublication", back_populates="artifact", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_artifact_session_created", "session_id", desc("created_at")),
         Index("ix_artifact_type", "type"),
+    )
+
+
+class ArtifactPublication(Base):
+    """An immutable, shareable version of a generated artifact."""
+
+    __tablename__ = "artifact_publication"
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    artifact_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("artifact.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    visibility: Mapped[SharingScope] = mapped_column(
+        Enum(
+            SharingScope,
+            native_enum=False,
+            name="artifact_publication_visibility",
+            values_callable=lambda enum: [member.value for member in enum],
+        ),
+        nullable=False,
+    )
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    revoked_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    artifact: Mapped[Artifact] = relationship("Artifact", back_populates="publications")
+    files: Mapped[list["ArtifactPublicationFile"]] = relationship(
+        "ArtifactPublicationFile",
+        back_populates="publication",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "artifact_id", "version", name="uq_artifact_publication_version"
+        ),
+        Index("ix_artifact_publication_artifact_created", "artifact_id", "created_at"),
+    )
+
+
+class ArtifactPublicationFile(Base):
+    """A static file that belongs to an artifact publication."""
+
+    __tablename__ = "artifact_publication_file"
+
+    publication_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("artifact_publication.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    path: Mapped[str] = mapped_column(String, primary_key=True)
+    storage_file_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("file_record.file_id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    mime_type: Mapped[str] = mapped_column(String, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    publication: Mapped[ArtifactPublication] = relationship(
+        "ArtifactPublication", back_populates="files"
     )
 
 

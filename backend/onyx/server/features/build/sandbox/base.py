@@ -489,6 +489,13 @@ class SandboxManager(_ServeMixin, ABC):
         ...
 
     @abstractmethod
+    def build_static_webapp(
+        self, sandbox_id: UUID, session_id: UUID, public_base_path: str
+    ) -> None:
+        """Build ``outputs/web`` into an export under ``outputs/web/out``."""
+        ...
+
+    @abstractmethod
     def upload_file(
         self,
         sandbox_id: UUID,

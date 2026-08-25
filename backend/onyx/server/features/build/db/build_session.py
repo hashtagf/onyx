@@ -12,7 +12,13 @@ from sqlalchemy.orm import Session
 
 from onyx.configs.constants import MessageType
 from onyx.db.enums import BuildSessionStatus, SessionOrigin, SharingScope
-from onyx.db.models import Artifact, BuildMessage, BuildSession, Sandbox
+from onyx.db.models import (
+    Artifact,
+    ArtifactPublication,
+    BuildMessage,
+    BuildSession,
+    Sandbox,
+)
 from onyx.error_handling.error_codes import OnyxErrorCode
 from onyx.error_handling.exceptions import OnyxError
 from onyx.server.features.build.configs import (
@@ -273,11 +279,37 @@ def set_build_session_sharing_scope(
     Only the session owner can change this setting.
     Returns the updated session, or None if not found/unauthorized.
     """
+    session = set_build_session_sharing_scope__no_commit(
+        session_id, user_id, sharing_scope, db_session
+    )
+    db_session.commit()
+    return session
+
+
+def set_build_session_sharing_scope__no_commit(
+    session_id: UUID,
+    user_id: UUID,
+    sharing_scope: SharingScope,
+    db_session: Session,
+) -> BuildSession | None:
+    """Set the sharing scope and flush. The caller commits the transaction."""
     session = get_build_session(session_id, user_id, db_session)
     if not session:
         return None
     session.sharing_scope = sharing_scope
-    db_session.commit()
+    if sharing_scope != SharingScope.PUBLIC:
+        publications = db_session.scalars(
+            select(ArtifactPublication)
+            .join(Artifact, Artifact.id == ArtifactPublication.artifact_id)
+            .where(
+                Artifact.session_id == session_id,
+                ArtifactPublication.revoked_at.is_(None),
+            )
+        ).all()
+        revoked_at = datetime.now(tz=timezone.utc)
+        for publication in publications:
+            publication.revoked_at = revoked_at
+    db_session.flush()
     logger.info("Set build session %s sharing_scope=%s", session_id, sharing_scope)
     return session
 

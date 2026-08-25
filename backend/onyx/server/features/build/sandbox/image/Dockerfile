@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.19
+
 # Sandbox Container Image
 #
 # User-shared sandbox: one pod per user, sessions created via kubectl exec.
