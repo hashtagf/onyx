@@ -519,6 +519,39 @@ def test_reuse_existing_container_starts_exited() -> None:
     exited.remove.assert_not_called()
 
 
+def test_refresh_proxy_firewall_runs_as_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reused sandbox must replace its stale proxy IP allow rule."""
+    container = MagicMock()
+    run_in_container = MagicMock()
+    monkeypatch.setattr(dsm, "run_in_container", run_in_container)
+
+    DockerSandboxManager._refresh_proxy_firewall(container)
+
+    run_in_container.assert_called_once_with(
+        container,
+        ["/bin/sh", "-c", dsm._PROXY_FIREWALL_REFRESH_SCRIPT],
+        user="0:0",
+    )
+
+
+def test_refresh_proxy_firewall_maps_exec_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed firewall refresh must stop sandbox reuse."""
+    container = MagicMock()
+    container.name = "sandbox-12345678"
+    monkeypatch.setattr(
+        dsm,
+        "run_in_container",
+        MagicMock(side_effect=dsm.ExecError("iptables failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="Failed to refresh proxy firewall"):
+        DockerSandboxManager._refresh_proxy_firewall(container)
+
+
 def test_provision_removes_container_when_history_restore_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

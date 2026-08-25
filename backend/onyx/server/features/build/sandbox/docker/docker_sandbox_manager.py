@@ -215,6 +215,26 @@ _OPENCODE_HISTORY_CREATE_SCRIPT = (
     "sys.stdout.write('' if p is None else str(p))"
 )
 
+# A Compose service can get a new bridge IP after it is recreated. Refresh the
+# proxy-only egress rule before a running sandbox is reused.
+_PROXY_FIREWALL_REFRESH_SCRIPT = r"""
+set -eu
+
+if echo "$SANDBOX_PROXY_HOST" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    proxy_ip="$SANDBOX_PROXY_HOST"
+else
+    proxy_ip="$(getent ahostsv4 "$SANDBOX_PROXY_HOST" | awk '{print $1; exit}')"
+fi
+
+[ -n "$proxy_ip" ]
+iptables -P OUTPUT DROP
+iptables -F OUTPUT
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A OUTPUT -p tcp -d "$proxy_ip" --dport "$SANDBOX_PROXY_PORT" -j ACCEPT
+iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
+"""
+
 
 def _run_in_container_as_sandbox_user(
     container: Container,
@@ -906,6 +926,9 @@ class DockerSandboxManager(SandboxManager):
                 f"opencode-serve never became ready in sandbox container {container.name}."
             )
 
+        if not created_fresh:
+            self._refresh_proxy_firewall(container)
+
         logger.info(
             "Provisioned Docker sandbox %s, container=%s.", sandbox_id, container.name
         )
@@ -915,6 +938,20 @@ class DockerSandboxManager(SandboxManager):
             status=SandboxStatus.RUNNING,
             last_heartbeat=None,
         )
+
+    @staticmethod
+    def _refresh_proxy_firewall(container: Container) -> None:
+        """Update the proxy allow rule after a Compose service IP change."""
+        try:
+            run_in_container(
+                container,
+                ["/bin/sh", "-c", _PROXY_FIREWALL_REFRESH_SCRIPT],
+                user="0:0",
+            )
+        except ExecError as e:
+            raise RuntimeError(
+                f"Failed to refresh proxy firewall for {container.name}: {e}"
+            ) from e
 
     def _reuse_existing_container(self, sandbox_id: UUID) -> Container | None:
         """Returns a reusable running/exited container, else None.
