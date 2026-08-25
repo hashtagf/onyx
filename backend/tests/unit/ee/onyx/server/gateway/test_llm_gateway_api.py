@@ -60,6 +60,7 @@ from onyx.server.gateway.models import (
     ResponsesRequest,
 )
 from onyx.server.manage.llm.models import LLMProviderView, ModelConfigurationView
+from onyx.server.settings.models import Tier
 from onyx.tracing.flows import LLMFlow
 from onyx.tracing.framework.create import get_current_trace
 
@@ -69,6 +70,12 @@ def _pat_request(token_scopes: list[Permission] | None) -> Request:
     if token_scopes is not None:
         request.state.token_scopes = token_scopes
     return request
+
+
+@pytest.fixture(autouse=True)
+def enterprise_gateway_tier() -> Generator[None, None, None]:
+    with patch.object(gateway_api, "get_tier", return_value=Tier.ENTERPRISE):
+        yield
 
 
 def _route_permission_dependency(path: str) -> Callable[..., Awaitable[User]]:
@@ -945,6 +952,42 @@ def test_gateway_route_has_single_permission_dependency() -> None:
         if getattr(dependency.call, "_is_require_permission", False)
     ]
     assert len(auth_dependencies) == 1
+
+
+def test_craft_gateway_flow_does_not_require_enterprise_tier() -> None:
+    user = cast(User, MagicMock(spec=User))
+    http_request = cast(Request, MagicMock(spec=Request))
+
+    with (
+        patch.object(
+            gateway_api,
+            "gateway_request_flow",
+            return_value=LLMFlow.CRAFT_LLM_GENERATION,
+        ),
+        patch.object(gateway_api, "get_tier") as get_tier,
+    ):
+        flow = gateway_api._authorize_gateway_request(http_request, user)
+
+    assert flow is LLMFlow.CRAFT_LLM_GENERATION
+    get_tier.assert_not_called()
+
+
+def test_external_gateway_flow_requires_enterprise_tier() -> None:
+    user = cast(User, MagicMock(spec=User))
+    http_request = cast(Request, MagicMock(spec=Request))
+
+    with (
+        patch.object(
+            gateway_api,
+            "gateway_request_flow",
+            return_value=LLMFlow.LLM_GATEWAY,
+        ),
+        patch.object(gateway_api, "get_tier", return_value=Tier.COMMUNITY),
+        pytest.raises(OnyxError) as exc_info,
+    ):
+        gateway_api._authorize_gateway_request(http_request, user)
+
+    assert exc_info.value.error_code is OnyxErrorCode.FEATURE_NOT_AVAILABLE
 
 
 def test_endpoint_threads_authorized_flow_to_handler() -> None:

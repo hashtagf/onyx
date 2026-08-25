@@ -148,6 +148,19 @@ async def test_unmapped_path_passes_through(
 
 
 @pytest.mark.asyncio
+@patch("ee.onyx.server.middleware.tier_gate.get_tier")
+async def test_gateway_tier_check_runs_after_authentication(
+    mock_get_tier: MagicMock, middleware_harness: MiddlewareHarness
+) -> None:
+    middleware, call_next = middleware_harness
+    response = await middleware(
+        _make_request("/api/gateway/v1/chat/completions"), call_next
+    )
+    assert response.status_code == 200
+    mock_get_tier.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_allowed_prefix_passes_without_tier_check(
     middleware_harness: MiddlewareHarness,
 ) -> None:

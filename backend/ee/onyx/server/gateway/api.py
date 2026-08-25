@@ -30,6 +30,7 @@ from ee.onyx.server.gateway.stream_bridge import (
     _stream_worker_guard,
     _StreamAccumulator,
 )
+from ee.onyx.utils.tier import get_tier
 from onyx.auth.permissions import require_permission
 from onyx.db.engine.sql_engine import get_session
 from onyx.db.enums import Permission
@@ -111,6 +112,8 @@ from onyx.server.gateway.models import (
 )
 from onyx.server.manage.llm.models import LLMProviderView, ModelConfigurationView
 from onyx.server.query_and_chat.token_limit import check_token_rate_limits
+from onyx.server.settings.models import Tier
+from onyx.server.settings.tier_order import tier_at_least
 from onyx.tracing.flows import LLMFlow
 from onyx.tracing.framework.create import trace
 from onyx.tracing.framework.traces import Trace
@@ -147,6 +150,11 @@ def _authorize_gateway_request(http_request: Request, user: User) -> LLMFlow:
         raise OnyxError(
             OnyxErrorCode.INSUFFICIENT_PERMISSIONS,
             "This credential is not authorized to use the Onyx LLM gateway.",
+        )
+    if flow is LLMFlow.LLM_GATEWAY and not tier_at_least(get_tier(), Tier.ENTERPRISE):
+        raise OnyxError(
+            OnyxErrorCode.FEATURE_NOT_AVAILABLE,
+            "This feature requires the Enterprise plan.",
         )
     return flow
 
