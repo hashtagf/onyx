@@ -1088,7 +1088,14 @@ class DockerSandboxManager(SandboxManager):
         except (APIError, NotFound):
             return False
         state = (container.attrs or {}).get("State") or {}
-        return state.get("Status") == "running"
+        if state.get("Status") != "running":
+            return False
+        try:
+            self._refresh_proxy_firewall(container)
+        except RuntimeError as e:
+            logger.warning("Sandbox %s proxy firewall is unhealthy: %s", sandbox_id, e)
+            return False
+        return True
 
     def _build_agents_md(
         self,

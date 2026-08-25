@@ -552,6 +552,31 @@ def test_refresh_proxy_firewall_maps_exec_error(
         DockerSandboxManager._refresh_proxy_firewall(container)
 
 
+def test_health_check_refreshes_proxy_firewall() -> None:
+    """Each turn health check must repair a stale Compose proxy IP."""
+    manager = _bare_manager()
+    container = MagicMock()
+    container.attrs = {"State": {"Status": "running"}}
+    manager._get_container = MagicMock(return_value=container)  # type: ignore[method-assign]
+    manager._refresh_proxy_firewall = MagicMock()  # type: ignore[method-assign]
+
+    assert manager.health_check(_SBX, timeout=1.0) is True
+    manager._refresh_proxy_firewall.assert_called_once_with(container)
+
+
+def test_health_check_rejects_stale_proxy_firewall() -> None:
+    """A failed repair makes lifecycle code reprovision the sandbox."""
+    manager = _bare_manager()
+    container = MagicMock()
+    container.attrs = {"State": {"Status": "running"}}
+    manager._get_container = MagicMock(return_value=container)  # type: ignore[method-assign]
+    manager._refresh_proxy_firewall = MagicMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("refresh failed")
+    )
+
+    assert manager.health_check(_SBX, timeout=1.0) is False
+
+
 def test_provision_removes_container_when_history_restore_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
