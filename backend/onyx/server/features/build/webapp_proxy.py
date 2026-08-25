@@ -40,7 +40,7 @@ from onyx.db.artifact import (
 )
 from onyx.db.engine.async_sql_engine import get_async_session_context_manager
 from onyx.db.engine.sql_engine import get_session
-from onyx.db.enums import Permission, SharingScope
+from onyx.db.enums import ArtifactSource, Permission, SharingScope
 from onyx.db.models import User
 from onyx.file_store.file_store import get_default_file_store
 from onyx.server.features.build.db.build_session import (
@@ -401,17 +401,27 @@ _PUBLIC_HTML_CSP = (
     "sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads; "
     "object-src 'none'; base-uri 'none'"
 )
+_CHAT_ARTIFACT_HTML_CSP = (
+    "sandbox allow-scripts allow-modals allow-downloads; "
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; "
+    "object-src 'none'; base-uri 'none'; form-action 'none'"
+)
 
 
 def _offline_html_response() -> Response:
     return Response(content=_OFFLINE_HTML, status_code=503, media_type="text/html")
 
 
-def _apply_public_html_security_headers(response: Response) -> Response:
+def _apply_public_html_security_headers(
+    response: Response, *, strict: bool = False
+) -> Response:
     """Isolate public generated HTML from the authenticated Onyx origin."""
     content_type = response.headers.get("content-type", "").lower()
     if content_type.startswith("text/html"):
-        response.headers["Content-Security-Policy"] = _PUBLIC_HTML_CSP
+        response.headers["Content-Security-Policy"] = (
+            _CHAT_ARTIFACT_HTML_CSP if strict else _PUBLIC_HTML_CSP
+        )
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=()"
         )
@@ -469,7 +479,10 @@ def get_published_artifact(
     response = Response(content=content, media_type=publication_file.mime_type)
     if publication_file.mime_type.startswith("text/html"):
         response.headers["Cache-Control"] = "no-store"
-        return _apply_public_html_security_headers(response)
+        return _apply_public_html_security_headers(
+            response,
+            strict=publication.artifact.source == ArtifactSource.CHAT,
+        )
     response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response

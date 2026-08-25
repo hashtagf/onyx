@@ -144,6 +144,7 @@ from onyx.server.utils import get_json_line
 from onyx.tools.constants import FILE_READER_TOOL_ID, SEARCH_TOOL_ID
 from onyx.tools.models import ChatFile, SearchToolUsage
 from onyx.tools.tool_constructor import (
+    ArtifactToolConfig,
     CustomToolConfig,
     FileReaderToolConfig,
     SearchToolConfig,
@@ -1349,6 +1350,14 @@ def _run_models(
                     message_id=setup.user_message_id,
                     additional_headers=setup.custom_tool_additional_headers,
                     mcp_headers=setup.mcp_headers,
+                ),
+                artifact_tool_config=(
+                    ArtifactToolConfig(
+                        chat_session_id=setup.chat_session_id,
+                        source_message_id=setup.user_message_id,
+                    )
+                    if setup.incognito_record_mode is None
+                    else None
                 ),
                 file_reader_tool_config=FileReaderToolConfig(
                     user_file_ids=setup.available_files.user_file_ids,

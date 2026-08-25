@@ -70,6 +70,7 @@ from onyx.db.enums import (
     AccountType,
     ApprovalDecidedVia,
     ApprovalDecision,
+    ArtifactSource,
     ArtifactType,
     BuildSessionStatus,
     ChatSessionSharedStatus,
@@ -3148,6 +3149,9 @@ class ChatSession(Base):
         back_populates="chat_session",
         cascade="all, delete-orphan",
         foreign_keys="ChatMessage.chat_session_id",
+    )
+    artifacts: Mapped[list["Artifact"]] = relationship(
+        "Artifact", back_populates="chat_session", cascade="all, delete-orphan"
     )
     persona: Mapped["Persona"] = relationship("Persona")
 
@@ -6395,10 +6399,29 @@ class Artifact(Base):
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    session_id: Mapped[UUID] = mapped_column(
+    owner_user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source: Mapped[ArtifactSource] = mapped_column(
+        Enum(
+            ArtifactSource,
+            native_enum=False,
+            name="artifactsource",
+            values_callable=lambda enum: [member.value for member in enum],
+        ),
+        nullable=False,
+    )
+    session_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("build_session.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+    )
+    chat_session_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("chat_session.id", ondelete="CASCADE"),
+        nullable=True,
     )
     type: Mapped[ArtifactType] = mapped_column(
         Enum(ArtifactType, native_enum=False, name="artifacttype"), nullable=False
@@ -6417,8 +6440,15 @@ class Artifact(Base):
     )
 
     # Relationships
-    session: Mapped[BuildSession] = relationship(
+    owner: Mapped[User] = relationship("User", foreign_keys=[owner_user_id])
+    session: Mapped[BuildSession | None] = relationship(
         "BuildSession", back_populates="artifacts"
+    )
+    chat_session: Mapped[ChatSession | None] = relationship(
+        "ChatSession", back_populates="artifacts"
+    )
+    revisions: Mapped[list["ArtifactRevision"]] = relationship(
+        "ArtifactRevision", back_populates="artifact", cascade="all, delete-orphan"
     )
     publications: Mapped[list["ArtifactPublication"]] = relationship(
         "ArtifactPublication", back_populates="artifact", cascade="all, delete-orphan"
@@ -6426,7 +6456,79 @@ class Artifact(Base):
 
     __table_args__ = (
         Index("ix_artifact_session_created", "session_id", desc("created_at")),
+        Index(
+            "ix_artifact_chat_session_created",
+            "chat_session_id",
+            desc("created_at"),
+        ),
+        Index("ix_artifact_owner_updated", "owner_user_id", desc("updated_at")),
         Index("ix_artifact_type", "type"),
+        CheckConstraint(
+            "(source = 'craft' AND session_id IS NOT NULL AND "
+            "chat_session_id IS NULL) OR "
+            "(source = 'chat' AND chat_session_id IS NOT NULL AND "
+            "session_id IS NULL)",
+            name="ck_artifact_source_parent",
+        ),
+    )
+
+
+class ArtifactRevision(Base):
+    """An immutable draft version of a Chat artifact."""
+
+    __tablename__ = "artifact_revision"
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    artifact_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("artifact.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_message.id", ondelete="SET NULL"), nullable=True
+    )
+    source_tool_call_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    artifact: Mapped[Artifact] = relationship("Artifact", back_populates="revisions")
+    files: Mapped[list["ArtifactRevisionFile"]] = relationship(
+        "ArtifactRevisionFile",
+        back_populates="revision",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("artifact_id", "version", name="uq_artifact_revision_version"),
+        Index("ix_artifact_revision_artifact_created", "artifact_id", "created_at"),
+    )
+
+
+class ArtifactRevisionFile(Base):
+    __tablename__ = "artifact_revision_file"
+
+    revision_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("artifact_revision.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    path: Mapped[str] = mapped_column(String, primary_key=True)
+    storage_file_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("file_record.file_id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    mime_type: Mapped[str] = mapped_column(String, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    revision: Mapped[ArtifactRevision] = relationship(
+        "ArtifactRevision", back_populates="files"
     )
 
 

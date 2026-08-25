@@ -74,6 +74,7 @@ from onyx.tools.models import (
     ToolCallKickoff,
     ToolResponse,
 )
+from onyx.tools.tool_implementations.artifact.models import ArtifactToolResponse
 from onyx.tools.tool_implementations.images.models import FinalImageGenerationResponse
 from onyx.tools.tool_implementations.memory.models import MemoryToolResponse
 from onyx.tools.tool_implementations.open_url.open_url_tool import OpenURLTool
@@ -1281,6 +1282,10 @@ def run_llm_loop(
                     saved_response = json.dumps(
                         tool_response.rich_response.model_dump()
                     )
+                elif isinstance(tool_response.rich_response, ArtifactToolResponse):
+                    saved_response = json.dumps(
+                        tool_response.rich_response.model_dump(mode="json")
+                    )
                 elif isinstance(tool_response.rich_response, str):
                     saved_response = tool_response.rich_response
                 else:
@@ -1294,7 +1299,11 @@ def run_llm_loop(
                     tool_call_id=tool_call.tool_call_id,
                     tool_id=tool.id,
                     reasoning_tokens=llm_step_result.reasoning,  # All tool calls from this loop share the same reasoning
-                    tool_call_arguments=tool_call.tool_args,
+                    tool_call_arguments=(
+                        tool_response.persisted_tool_args
+                        if tool_response.persisted_tool_args is not None
+                        else tool_call.tool_args
+                    ),
                     tool_call_response=saved_response,
                     search_docs=displayed_docs or search_docs,
                     generated_images=generated_images,

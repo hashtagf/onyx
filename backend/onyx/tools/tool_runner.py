@@ -26,6 +26,10 @@ from onyx.tools.models import (
     ToolResponse,
     WebSearchToolOverrideKwargs,
 )
+from onyx.tools.tool_implementations.artifact.artifact_tool import (
+    ArtifactTool,
+    ArtifactToolOverrideKwargs,
+)
 from onyx.tools.tool_implementations.coding_agent.coding_agent_tool import (
     CodingAgentTool,
     CodingAgentToolOverrideKwargs,
@@ -354,6 +358,7 @@ def run_tool_calls(
             | PythonToolOverrideKwargs
             | MemoryToolOverrideKwargs
             | CodingAgentToolOverrideKwargs
+            | ArtifactToolOverrideKwargs
             | None
         ) = None
 
@@ -403,6 +408,8 @@ def run_tool_calls(
             )
         elif isinstance(tool, CodingAgentTool):
             override_kwargs = CodingAgentToolOverrideKwargs()
+        elif isinstance(tool, ArtifactTool):
+            override_kwargs = ArtifactToolOverrideKwargs()
         elif isinstance(tool, MemoryTool):
             override_kwargs = MemoryToolOverrideKwargs(
                 user_name=(

@@ -550,5 +550,32 @@ describe("usePacketProcessor", () => {
       expect(result.current.finalAnswerComing).toBe(true);
       expect(result.current.displayGroups.length).toBe(1);
     });
+
+    test("keeps an HTML artifact in display content", () => {
+      const packets = [
+        createPacket(PacketType.ARTIFACT_TOOL_START, { turn_index: 0 }),
+        createPacket(
+          PacketType.ARTIFACT_TOOL_FINAL,
+          { turn_index: 0 },
+          {
+            artifact_id: "artifact-1",
+            revision_id: "revision-1",
+            version: 1,
+            title: "Status board",
+            preview_url: "/api/artifacts/artifact-1/preview",
+            content_hash: "hash",
+            size_bytes: 128,
+          }
+        ),
+        createPacket(PacketType.SECTION_END, { turn_index: 0 }),
+        createStopPacket(),
+      ];
+
+      const { result } = renderHook(() => usePacketProcessor(packets, 1));
+
+      expect(result.current.displayGroups).toHaveLength(1);
+      expect(result.current.toolGroups).toHaveLength(0);
+      expect(result.current.finalAnswerComing).toBe(true);
+    });
   });
 });

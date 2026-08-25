@@ -408,6 +408,7 @@ class FileStoreType(str, Enum):
 
 
 class FileOrigin(str, Enum):
+    ARTIFACT_REVISION = "artifact_revision"
     ARTIFACT_PUBLICATION = "artifact_publication"
     CHAT_UPLOAD = "chat_upload"
     CHAT_IMAGE_GEN = "chat_image_gen"

@@ -21,6 +21,7 @@ from onyx.server.query_and_chat.streaming_models import (
     CustomToolErrorInfo,
     GeneratedImage,
 )
+from onyx.tools.tool_implementations.artifact.models import ArtifactToolResponse
 from onyx.tools.tool_implementations.images.models import FinalImageGenerationResponse
 from onyx.tools.tool_implementations.memory.models import MemoryToolResponse
 
@@ -91,6 +92,7 @@ class ToolResponse(BaseModel):
         | SearchDocsResponse
         # This comes from the memory tool, memory needs to be persisted to the database
         | MemoryToolResponse
+        | ArtifactToolResponse
         # This comes from open url, web content needs to be saved, maybe this can be consolidated too
         # | WebContentResponse
         # This comes from custom tools, tool result needs to be saved
@@ -107,6 +109,8 @@ class ToolResponse(BaseModel):
     # The response is first created by the tool runner, which does not need to be aware of things like the tool_call_id
     # So this is set after the response is created by the tool runner
     tool_call: ToolCallKickoff | None = None
+    # Tools with large inputs can provide a compact form for Chat persistence.
+    persisted_tool_args: dict[str, Any] | None = None
 
 
 class ParallelToolCallResponse(BaseModel):

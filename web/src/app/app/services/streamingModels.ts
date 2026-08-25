@@ -71,6 +71,10 @@ export enum PacketType {
   // Bash Tool packets
   BASH_TOOL_START = "bash_tool_start",
   BASH_TOOL_DELTA = "bash_tool_delta",
+
+  // HTML Artifact packets
+  ARTIFACT_TOOL_START = "artifact_tool_start",
+  ARTIFACT_TOOL_FINAL = "artifact_tool_final",
 }
 
 export const CODE_INTERPRETER_TOOL_TYPES = {
@@ -355,6 +359,21 @@ export interface BashToolDelta extends BaseObj {
   timed_out: boolean;
 }
 
+export interface ArtifactToolStart extends BaseObj {
+  type: "artifact_tool_start";
+}
+
+export interface ArtifactToolFinal extends BaseObj {
+  type: "artifact_tool_final";
+  artifact_id: string;
+  revision_id: string;
+  version: number;
+  title: string;
+  preview_url: string;
+  content_hash: string;
+  size_bytes: number;
+}
+
 export type ChatObj = MessageStart | MessageDelta | MessageEnd;
 
 export type StopObj = Stop;
@@ -457,6 +476,12 @@ export type CodingAgentObj =
   | SectionEnd
   | PacketError;
 
+export type ArtifactToolObj =
+  | ArtifactToolStart
+  | ArtifactToolFinal
+  | SectionEnd
+  | PacketError;
+
 // Union type for all possible streaming objects
 export type ObjTypes =
   | ChatObj
@@ -470,6 +495,7 @@ export type ObjTypes =
   | DeepResearchPlanObj
   | ResearchAgentObj
   | CodingAgentObj
+  | ArtifactToolObj
   | PacketErrorObj
   | CitationObj;
 
@@ -565,4 +591,9 @@ export interface ResearchAgentPacket {
 export interface CodingAgentPacket {
   placement: Placement;
   obj: CodingAgentObj;
+}
+
+export interface ArtifactToolPacket {
+  placement: Placement;
+  obj: ArtifactToolObj;
 }

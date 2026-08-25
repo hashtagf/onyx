@@ -24,6 +24,8 @@ from onyx.server.query_and_chat.placement import Placement
 from onyx.server.query_and_chat.streaming_models import (
     AgentResponseDelta,
     AgentResponseStart,
+    ArtifactToolFinal,
+    ArtifactToolStart,
     CitationInfo,
     CodingAgentFinal,
     CodingAgentStart,
@@ -56,6 +58,8 @@ from onyx.server.query_and_chat.streaming_models import (
     SectionEnd,
     TopLevelBranching,
 )
+from onyx.tools.tool_implementations.artifact.artifact_tool import ArtifactTool
+from onyx.tools.tool_implementations.artifact.models import ArtifactToolResponse
 from onyx.tools.tool_implementations.coding_agent.coding_agent_tool import (
     CodingAgentTool,
 )
@@ -184,6 +188,21 @@ def create_image_generation_packets(
     )
 
     return packets
+
+
+def create_artifact_packets(
+    summary_json: str, turn_index: int, tab_index: int = 0
+) -> list[Packet]:
+    summary = ArtifactToolResponse.model_validate_json(summary_json)
+    placement = Placement(turn_index=turn_index, tab_index=tab_index)
+    return [
+        Packet(placement=placement, obj=ArtifactToolStart()),
+        Packet(
+            placement=placement,
+            obj=ArtifactToolFinal(**summary.model_dump()),
+        ),
+        Packet(placement=placement, obj=SectionEnd()),
+    ]
 
 
 def create_custom_tool_packets(
@@ -683,6 +702,15 @@ def translate_assistant_message_to_packets(
                                 query=coding_query,
                                 repo=coding_repo,
                                 answer=tool_call.tool_call_response,
+                                turn_index=turn_num,
+                                tab_index=tool_call.tab_index,
+                            )
+                        )
+
+                    elif tool.in_code_tool_id == ArtifactTool.__name__:
+                        turn_tool_packets.extend(
+                            create_artifact_packets(
+                                summary_json=tool_call.tool_call_response,
                                 turn_index=turn_num,
                                 tab_index=tool_call.tab_index,
                             )

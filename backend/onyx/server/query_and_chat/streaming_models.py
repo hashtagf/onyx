@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal, Union
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -60,6 +61,9 @@ class StreamingType(Enum):
 
     BASH_TOOL_START = "bash_tool_start"
     BASH_TOOL_DELTA = "bash_tool_delta"
+
+    ARTIFACT_TOOL_START = "artifact_tool_start"
+    ARTIFACT_TOOL_FINAL = "artifact_tool_final"
 
 
 class BaseObj(BaseModel):
@@ -428,6 +432,25 @@ class BashToolDelta(BaseObj):
 
 
 ################################################
+# Artifact Tool Packets
+################################################
+class ArtifactToolStart(BaseObj):
+    type: Literal["artifact_tool_start"] = StreamingType.ARTIFACT_TOOL_START.value
+
+
+class ArtifactToolFinal(BaseObj):
+    type: Literal["artifact_tool_final"] = StreamingType.ARTIFACT_TOOL_FINAL.value
+
+    artifact_id: UUID
+    revision_id: UUID
+    version: int
+    title: str
+    preview_url: str
+    content_hash: str
+    size_bytes: int
+
+
+################################################
 # Packet Object
 ################################################
 # Discriminated union of all possible packet object types
@@ -484,6 +507,8 @@ PacketObj = Union[
     # Bash Tool Packets
     BashToolStart,
     BashToolDelta,
+    ArtifactToolStart,
+    ArtifactToolFinal,
 ]
 
 

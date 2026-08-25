@@ -32,6 +32,7 @@ from onyx.server.features.mcp.credentials import (
 from onyx.tools.built_in_tools import get_built_in_tool_by_id
 from onyx.tools.interface import Tool
 from onyx.tools.models import DynamicSchemaInfo, SearchToolUsage
+from onyx.tools.tool_implementations.artifact.artifact_tool import ArtifactTool
 from onyx.tools.tool_implementations.coding_agent.coding_agent_tool import (
     CodingAgentTool,
 )
@@ -88,6 +89,11 @@ class CustomToolConfig(BaseModel):
     message_id: int | None = None
     additional_headers: dict[str, str] | None = None
     mcp_headers: dict[str, str] | None = None
+
+
+class ArtifactToolConfig(BaseModel):
+    chat_session_id: UUID
+    source_message_id: int | None = None
 
 
 def _get_image_generation_config(llm: LLM, db_session: Session) -> LLMConfig:
@@ -148,6 +154,7 @@ def construct_tools(
     db_session: Session | None = None,
     search_tool_config: SearchToolConfig | None = None,
     custom_tool_config: CustomToolConfig | None = None,
+    artifact_tool_config: ArtifactToolConfig | None = None,
     file_reader_tool_config: FileReaderToolConfig | None = None,
     allowed_tool_ids: list[int] | None = None,
     search_usage_forcing_setting: SearchToolUsage = SearchToolUsage.AUTO,
@@ -169,6 +176,7 @@ def construct_tools(
             llm=llm,
             search_tool_config=search_tool_config,
             custom_tool_config=custom_tool_config,
+            artifact_tool_config=artifact_tool_config,
             file_reader_tool_config=file_reader_tool_config,
             allowed_tool_ids=allowed_tool_ids,
             search_usage_forcing_setting=search_usage_forcing_setting,
@@ -183,6 +191,7 @@ def _construct_tools_impl(
     llm: LLM,
     search_tool_config: SearchToolConfig | None = None,
     custom_tool_config: CustomToolConfig | None = None,
+    artifact_tool_config: ArtifactToolConfig | None = None,
     file_reader_tool_config: FileReaderToolConfig | None = None,
     allowed_tool_ids: list[int] | None = None,
     search_usage_forcing_setting: SearchToolUsage = SearchToolUsage.AUTO,
@@ -497,6 +506,26 @@ def _construct_tools_impl(
                     expected_tool_name,
                     mcp_server.name,
                 )
+
+    # HTML artifacts are a Chat platform capability. They do not depend on a
+    # persona attachment or on Craft sandbox access.
+    if artifact_tool_config and ArtifactTool.is_available(db_session):
+        try:
+            artifact_db_tool = get_builtin_tool(db_session, ArtifactTool)
+            tool_dict[artifact_db_tool.id] = [
+                ArtifactTool(
+                    tool_id=artifact_db_tool.id,
+                    emitter=emitter,
+                    user_id=user.id,
+                    chat_session_id=artifact_tool_config.chat_session_id,
+                    source_message_id=artifact_tool_config.source_message_id,
+                )
+            ]
+        except RuntimeError:
+            logger.warning(
+                "ArtifactTool is enabled but missing from the database. "
+                "Run the latest Alembic migration."
+            )
 
     if (
         not added_search_tool

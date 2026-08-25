@@ -1,5 +1,6 @@
 from typing import Type, Union
 
+from onyx.tools.tool_implementations.artifact.artifact_tool import ArtifactTool
 from onyx.tools.tool_implementations.coding_agent.coding_agent_tool import (
     CodingAgentTool,
 )
@@ -30,6 +31,7 @@ BUILT_IN_TOOL_TYPES = Union[
     FileReaderTool,
     MemoryTool,
     CodingAgentTool,
+    ArtifactTool,
 ]
 
 BUILT_IN_TOOL_MAP: dict[str, Type[BUILT_IN_TOOL_TYPES]] = {
@@ -42,6 +44,7 @@ BUILT_IN_TOOL_MAP: dict[str, Type[BUILT_IN_TOOL_TYPES]] = {
     FileReaderTool.__name__: FileReaderTool,
     MemoryTool.__name__: MemoryTool,
     CodingAgentTool.__name__: CodingAgentTool,
+    ArtifactTool.__name__: ArtifactTool,
 }
 
 STOPPING_TOOLS_NAMES: list[str] = [ImageGenerationTool.NAME]

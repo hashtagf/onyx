@@ -543,6 +543,11 @@ class ArtifactType(str, PyEnum):
     EXCEL = "excel"
 
 
+class ArtifactSource(str, PyEnum):
+    CRAFT = "craft"
+    CHAT = "chat"
+
+
 class HierarchyNodeType(str, PyEnum):
     """Types of hierarchy nodes across different sources"""
 

@@ -58,6 +58,13 @@ SEND_USER_METADATA_TO_LLM_PROVIDER = (
 #####
 BLURB_SIZE = 128  # Number Encoder Tokens included in the chunk blurb
 
+ENABLE_CHAT_ARTIFACTS = (
+    os.environ.get("ENABLE_CHAT_ARTIFACTS", "true").lower() == "true"
+)
+MAX_CHAT_ARTIFACT_SIZE_BYTES = _non_negative_int_env(
+    "MAX_CHAT_ARTIFACT_SIZE_BYTES", 500_000
+)
+
 # Hard ceiling for the admin-configurable file upload size (in MB).
 # Self-hosted customers can raise or lower this via the environment variable.
 MAX_ALLOWED_UPLOAD_SIZE_MB = _non_negative_int_env("MAX_ALLOWED_UPLOAD_SIZE_MB", 250)

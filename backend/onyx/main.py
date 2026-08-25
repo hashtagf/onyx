@@ -65,6 +65,7 @@ from onyx.file_store.file_store import get_default_file_store
 from onyx.hooks.registry import validate_registry
 from onyx.redis.redis_pool import log_redis_server_diagnostics
 from onyx.server.api_key.api import router as api_key_router
+from onyx.server.artifacts.api import router as artifacts_router
 from onyx.server.auth.captcha_api import CaptchaCookieMiddleware, LoginCaptchaMiddleware
 from onyx.server.auth.captcha_api import router as captcha_router
 from onyx.server.auth.mobile import router as mobile_auth_router
@@ -547,6 +548,7 @@ def get_application(lifespan_override: Lifespan | None = None) -> FastAPI:
     include_router_with_global_prefix_prepended(application, projects_router)
     include_router_with_global_prefix_prepended(application, public_build_router)
     include_router_with_global_prefix_prepended(application, build_router)
+    include_router_with_global_prefix_prepended(application, artifacts_router)
     include_router_with_global_prefix_prepended(application, build_admin_router)
     include_router_with_global_prefix_prepended(application, image_generation_router)
     include_router_with_global_prefix_prepended(application, document_set_router)

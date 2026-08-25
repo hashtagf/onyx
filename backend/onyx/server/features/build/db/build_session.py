@@ -11,7 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from onyx.configs.constants import MessageType
-from onyx.db.enums import BuildSessionStatus, SessionOrigin, SharingScope
+from onyx.db.enums import (
+    ArtifactSource,
+    BuildSessionStatus,
+    SessionOrigin,
+    SharingScope,
+)
 from onyx.db.models import (
     Artifact,
     ArtifactPublication,
@@ -359,7 +364,12 @@ def create_artifact(
     db_session: Session,
 ) -> Artifact:
     """Create a new artifact record."""
+    build_session = db_session.get(BuildSession, session_id)
+    if build_session is None:
+        raise ValueError("Build session not found")
     artifact = Artifact(
+        owner_user_id=build_session.user_id,
+        source=ArtifactSource.CRAFT,
         session_id=session_id,
         type=artifact_type,
         path=path,

@@ -31,6 +31,7 @@ import { DeepResearchPlanRenderer } from "./timeline/renderers/deepresearch/Deep
 import { ResearchAgentRenderer } from "./timeline/renderers/deepresearch/ResearchAgentRenderer";
 import { WebSearchToolRenderer } from "./timeline/renderers/search/WebSearchToolRenderer";
 import { InternalSearchToolRenderer } from "./timeline/renderers/search/InternalSearchToolRenderer";
+import { ArtifactToolRenderer } from "./renderers/ArtifactToolRenderer";
 
 // Different types of chat packets using discriminated unions
 interface GroupedPackets {
@@ -57,6 +58,10 @@ function isInternalSearchPacket(packet: Packet): boolean {
 
 function isImageToolPacket(packet: Packet) {
   return packet.obj.type === PacketType.IMAGE_GENERATION_TOOL_START;
+}
+
+function isArtifactToolPacket(packet: Packet) {
+  return packet.obj.type === PacketType.ARTIFACT_TOOL_START;
 }
 
 function isPythonToolPacket(packet: Packet) {
@@ -145,6 +150,9 @@ export function findRenderer(
   }
   if (groupedPackets.packets.some((packet) => isImageToolPacket(packet))) {
     return ImageToolRenderer;
+  }
+  if (groupedPackets.packets.some((packet) => isArtifactToolPacket(packet))) {
+    return ArtifactToolRenderer;
   }
   if (groupedPackets.packets.some((packet) => isPythonToolPacket(packet))) {
     return PythonToolRenderer;
