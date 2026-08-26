@@ -241,11 +241,11 @@ def is_reasoning_model(model_id: str, display_name: str) -> bool:
     return any(pattern in combined for pattern in REASONING_MODEL_PATTERNS)
 
 
-def lm_studio_capability_enabled(value: object) -> bool:
-    """Read one entry of an LM Studio `capabilities` object as a boolean.
+def model_capability_enabled(value: object) -> bool:
+    """Read one entry of a model `capabilities` object as a boolean.
 
-    LM Studio reports a capability either as a plain boolean or as an options
-    object, for example
+    Model APIs can report a capability as a plain boolean or as an options object,
+    for example
     `{"allowed_options": ["off", "low", "high"], "default": "off"}`.
     An options object means the model supports the capability, unless "off" is
     the only allowed option.

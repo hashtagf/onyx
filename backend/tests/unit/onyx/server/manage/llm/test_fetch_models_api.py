@@ -1595,6 +1595,41 @@ class TestGetBifrostAvailableModels:
 class TestGetOpenAICompatibleAvailableModels:
     """Tests for the generic OpenAI-compatible model fetch endpoint."""
 
+    def test_uses_gateway_capability_metadata(self) -> None:
+        """Custom model capabilities must not depend on the LiteLLM catalog."""
+        from onyx.server.manage.llm.api import (
+            get_openai_compatible_server_available_models,
+        )
+
+        mock_session = MagicMock()
+        response = {
+            "data": [
+                {
+                    "id": "dgx/qwen3.8-27b",
+                    "name": "Qwen 3.8 27B",
+                    "context_length": 1_000_000,
+                    "capabilities": {"vision": True, "reasoning": True},
+                }
+            ]
+        }
+
+        with patch("onyx.server.manage.llm.api.httpx.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.json.return_value = response
+            mock_response.raise_for_status = MagicMock()
+            mock_get.return_value = mock_response
+
+            results = get_openai_compatible_server_available_models(
+                OpenAICompatibleModelsRequest(api_base="https://llm.example.com"),
+                MagicMock(),
+                mock_session,
+            )
+
+        assert len(results) == 1
+        assert results[0].supports_image_input is True
+        assert results[0].supports_reasoning is True
+        assert results[0].max_input_tokens == 1_000_000
+
     def test_infers_reasoning_support(self) -> None:
         """Reasoning support comes from the LiteLLM cost map first, with the
         substring heuristic as fallback for models LiteLLM doesn't know."""

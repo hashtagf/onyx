@@ -123,7 +123,7 @@ from onyx.server.manage.llm.utils import (
     is_embedding_model,
     is_reasoning_model,
     is_valid_bedrock_model,
-    lm_studio_capability_enabled,
+    model_capability_enabled,
     strip_openrouter_vendor_prefix,
 )
 from onyx.utils.audit import (
@@ -1656,10 +1656,10 @@ def get_lm_studio_available_models(
                     name=model_key,
                     display_name=display_name,
                     max_input_tokens=max_context_length,
-                    supports_image_input=lm_studio_capability_enabled(
+                    supports_image_input=model_capability_enabled(
                         capabilities.get("vision")
                     ),
-                    supports_reasoning=lm_studio_capability_enabled(
+                    supports_reasoning=model_capability_enabled(
                         capabilities.get("reasoning")
                     )
                     or is_reasoning_model(model_key, display_name),
@@ -2137,18 +2137,28 @@ def get_openai_compatible_server_available_models(
             if is_embedding_model(model_id):
                 continue
 
+            capabilities = model.get("capabilities")
+            if not isinstance(capabilities, dict):
+                capabilities = {}
+
             results.append(
                 OpenAICompatibleFinalModelResponse(
                     name=model_id,
                     display_name=model_name,
                     max_input_tokens=model.get("context_length"),
-                    supports_image_input=litellm_thinks_model_supports_image_input(
-                        model_id, LlmProviderNames.OPENAI_COMPATIBLE
+                    supports_image_input=(
+                        model_capability_enabled(capabilities.get("vision"))
+                        or litellm_thinks_model_supports_image_input(
+                            model_id, LlmProviderNames.OPENAI_COMPATIBLE
+                        )
                     ),
-                    # Reasoning support from the LiteLLM cost map, with the
-                    # substring heuristic covering models LiteLLM doesn't know
-                    supports_reasoning=model_is_reasoning_model(
-                        model_id, LlmProviderNames.OPENAI_COMPATIBLE
+                    # Prefer gateway metadata. Keep the existing fallbacks for
+                    # OpenAI-compatible endpoints that return only model names.
+                    supports_reasoning=(
+                        model_capability_enabled(capabilities.get("reasoning"))
+                        or model_is_reasoning_model(
+                            model_id, LlmProviderNames.OPENAI_COMPATIBLE
+                        )
                     )
                     or is_reasoning_model(model_id, model_name),
                 )
