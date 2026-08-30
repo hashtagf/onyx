@@ -9,6 +9,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from onyx.db.ai_improvement import get_production_skill_configuration
 from onyx.db.enums import GatedAppKind
 from onyx.db.external_app import (
     get_connectable_apps_for_user,
@@ -41,6 +42,7 @@ from onyx.skills.built_in import (
     EXTERNAL_APP_SKILL_ID_TO_APP_TYPE,
     BuiltInSkillDefinition,
 )
+from onyx.skills.metadata import parse_skill_md_frontmatter, serialize_skill_md
 from onyx.skills.rendering import render_company_search_skill, render_external_app_skill
 from onyx.skills.validation import (
     load_stored_custom_skill_bundle,
@@ -151,6 +153,23 @@ def _add_bundle_bytes(files: FileSet, skill: Skill, bundle_bytes: bytes) -> None
         )
 
 
+def _apply_production_override(
+    files: FileSet, skill: Skill, db_session: Session
+) -> None:
+    configuration = get_production_skill_configuration(db_session, skill)
+    path = f"{skill.name}/SKILL.md"
+    if configuration is None or path not in files:
+        return
+    try:
+        frontmatter, _ = parse_skill_md_frontmatter(files[path])
+        frontmatter["description"] = configuration["description"]
+        files[path] = serialize_skill_md(
+            frontmatter, configuration["instructions_markdown"]
+        ).encode("utf-8")
+    except Exception:
+        logger.warning("Failed to apply production override for skill %s", skill.id)
+
+
 def _assemble_fileset(
     skills: Iterable[Skill],
     user: User,
@@ -216,6 +235,7 @@ def _assemble_fileset(
                     continue
 
             _add_bundle_bytes(files, skill, bundle_bytes)
+            _apply_production_override(files, skill, db_session)
             continue
         definition = BUILT_IN_SKILLS.get(skill.built_in_skill_id)
         if definition is None:
@@ -228,6 +248,7 @@ def _assemble_fileset(
         _add_static_builtin(files, skill, definition)
         if definition.has_template:
             _render_template(files, skill, definition, db_session, user)
+        _apply_production_override(files, skill, db_session)
 
     try:
         persist_skill_validity(validity_updates)

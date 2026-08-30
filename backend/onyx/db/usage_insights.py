@@ -8,13 +8,15 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import Date, case, cast, func, select
 from sqlalchemy.orm import Session
 
 from onyx.configs.constants import MessageType
+from onyx.db.chat_quality import QualityEvaluation, weighted_answer_quality_score
 from onyx.db.models import (
     ChatMessage,
     ChatMessageFeedback,
+    ChatMessageQualityEvaluation,
     ChatSession,
     Persona,
     User,
@@ -283,6 +285,14 @@ class ChatHistoryMessage(BaseModel):
     message: str
     token_count: int
     model_display_name: str | None
+    processing_duration_seconds: float | None
+    error: str | None
+    citation_count: int
+    feedback: bool | None
+    quality_evaluation: QualityEvaluation | None
+    human_quality_evaluation: QualityEvaluation | None
+    llm_quality_evaluation: QualityEvaluation | None
+    selected_quality_evaluation: QualityEvaluation | None
 
 
 def fetch_session_messages(
@@ -296,6 +306,40 @@ def fetch_session_messages(
         )
         .order_by(ChatMessage.id)
     ).all()
+    message_ids = [message.id for message in messages]
+    evaluations = (
+        db_session.scalars(
+            select(ChatMessageQualityEvaluation).where(
+                ChatMessageQualityEvaluation.chat_message_id.in_(message_ids)
+            )
+        ).all()
+        if message_ids
+        else []
+    )
+    evaluation_map = {
+        (evaluation.chat_message_id, evaluation.evaluation_source): (
+            QualityEvaluation.model_validate(evaluation)
+        )
+        for evaluation in evaluations
+    }
+    latest_feedback_ids = (
+        select(func.max(ChatMessageFeedback.id).label("id"))
+        .where(ChatMessageFeedback.chat_message_id.in_(message_ids))
+        .group_by(ChatMessageFeedback.chat_message_id)
+    )
+    feedback_rows = (
+        db_session.execute(
+            select(
+                ChatMessageFeedback.chat_message_id,
+                ChatMessageFeedback.is_positive,
+            ).where(ChatMessageFeedback.id.in_(latest_feedback_ids))
+        ).all()
+        if message_ids
+        else []
+    )
+    feedback_map = {
+        message_id: is_positive for message_id, is_positive in feedback_rows
+    }
     return [
         ChatHistoryMessage(
             id=m.id,
@@ -304,6 +348,15 @@ def fetch_session_messages(
             message=m.message or "",
             token_count=m.token_count,
             model_display_name=m.model_display_name,
+            processing_duration_seconds=m.processing_duration_seconds,
+            error=m.error,
+            citation_count=len(m.citations or {}),
+            feedback=feedback_map.get(m.id),
+            quality_evaluation=evaluation_map.get((m.id, "human")),
+            human_quality_evaluation=evaluation_map.get((m.id, "human")),
+            llm_quality_evaluation=evaluation_map.get((m.id, "llm_judge")),
+            selected_quality_evaluation=evaluation_map.get((m.id, "human"))
+            or evaluation_map.get((m.id, "llm_judge")),
         )
         for m in messages
         if m.message
@@ -319,25 +372,82 @@ EXPORT_HEADER = [
     "message_type",
     "token_count",
     "model",
+    "processing_duration_seconds",
+    "error",
+    "citation_count",
+    "feedback",
+    "evaluation_source",
+    "task_category",
+    "task_success",
+    "first_answer_resolution",
+    "required_rephrase",
+    "answer_quality_score",
+    "correctness",
+    "relevance",
+    "completeness",
+    "clarity",
+    "instruction_following",
+    "grounded",
+    "citation_accuracy",
+    "retrieval_relevance",
+    "hallucination_detected",
+    "appropriate_refusal",
+    "false_refusal",
+    "harmful_response",
+    "sensitive_data_leakage",
+    "unauthorized_document_exposure",
+    "policy_violation",
+    "prompt_injection_succeeded",
+    "evaluation_notes",
     "message",
 ]
 
 
 def iter_export_rows(db_session: Session, days: int) -> list[list[str]]:
     cutoff = _cutoff(days)
+    latest_feedback = (
+        select(ChatMessageFeedback.is_positive)
+        .where(ChatMessageFeedback.chat_message_id == ChatMessage.id)
+        .order_by(ChatMessageFeedback.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    preferred_evaluation_id = (
+        select(ChatMessageQualityEvaluation.id)
+        .where(ChatMessageQualityEvaluation.chat_message_id == ChatMessage.id)
+        .order_by(
+            case(
+                (ChatMessageQualityEvaluation.evaluation_source == "human", 0),
+                else_=1,
+            )
+        )
+        .limit(1)
+        .correlate(ChatMessage)
+        .scalar_subquery()
+    )
     rows = db_session.execute(
-        select(  # ty: ignore[no-matching-overload]
+        select(
             ChatMessage.time_sent,
-            User.email,
+            User.email,  # ty: ignore[invalid-argument-type]
             Persona.name,
             ChatMessage.message_type,
             ChatMessage.token_count,
             ChatMessage.model_display_name,
+            ChatMessage.processing_duration_seconds,
+            ChatMessage.error,
+            ChatMessage.citations,
+            latest_feedback,
+            ChatMessageQualityEvaluation,
             ChatMessage.message,
         )
         .join(ChatSession, ChatSession.id == ChatMessage.chat_session_id)
         .join(User, User.id == ChatSession.user_id, isouter=True)
         .join(Persona, Persona.id == ChatSession.persona_id, isouter=True)
+        .join(
+            ChatMessageQualityEvaluation,
+            ChatMessageQualityEvaluation.id == preferred_evaluation_id,
+            isouter=True,
+        )
         .where(
             ChatMessage.time_sent >= cutoff,
             ChatMessage.message_type != MessageType.SYSTEM,
@@ -347,8 +457,34 @@ def iter_export_rows(db_session: Session, days: int) -> list[list[str]]:
     ).all()
 
     return [
-        format_export_row(time_sent, email, persona, mtype, tokens, model, message)
-        for time_sent, email, persona, mtype, tokens, model, message in rows
+        format_export_row(
+            time_sent,
+            email,
+            persona,
+            mtype,
+            tokens,
+            model,
+            message,
+            processing_duration_seconds=duration,
+            error=error,
+            citation_count=len(citations or {}),
+            feedback=feedback,
+            evaluation=evaluation,
+        )
+        for (
+            time_sent,
+            email,
+            persona,
+            mtype,
+            tokens,
+            model,
+            duration,
+            error,
+            citations,
+            feedback,
+            evaluation,
+            message,
+        ) in rows
         if message
     ]
 
@@ -361,6 +497,12 @@ def format_export_row(
     token_count: int | None,
     model: str | None,
     message: str | None,
+    *,
+    processing_duration_seconds: float | None = None,
+    error: str | None = None,
+    citation_count: int = 0,
+    feedback: bool | None = None,
+    evaluation: ChatMessageQualityEvaluation | None = None,
 ) -> list[str]:
     """One CSV row; message truncated so exports stay readable."""
     type_value = (
@@ -371,6 +513,30 @@ def format_export_row(
     text = (message or "").replace("\r\n", "\n")
     if len(text) > 2000:
         text = text[:2000] + "…"
+
+    def optional(value: object | None) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
+
+    answer_quality_score: float | None = None
+    if (
+        evaluation
+        and evaluation.correctness is not None
+        and evaluation.relevance is not None
+        and evaluation.completeness is not None
+        and evaluation.clarity is not None
+        and evaluation.instruction_following is not None
+    ):
+        answer_quality_score = weighted_answer_quality_score(
+            evaluation.correctness,
+            evaluation.relevance,
+            evaluation.completeness,
+            evaluation.clarity,
+            evaluation.instruction_following,
+        )
     return [
         time_sent.isoformat(),
         email or "",
@@ -378,5 +544,32 @@ def format_export_row(
         type_value,
         str(token_count or 0),
         model or "",
+        optional(processing_duration_seconds),
+        error or "",
+        str(citation_count),
+        optional(feedback),
+        optional(evaluation.evaluation_source if evaluation else None),
+        optional(evaluation.task_category if evaluation else None),
+        optional(evaluation.task_success if evaluation else None),
+        optional(evaluation.first_answer_resolution if evaluation else None),
+        optional(evaluation.required_rephrase if evaluation else None),
+        optional(answer_quality_score),
+        optional(evaluation.correctness if evaluation else None),
+        optional(evaluation.relevance if evaluation else None),
+        optional(evaluation.completeness if evaluation else None),
+        optional(evaluation.clarity if evaluation else None),
+        optional(evaluation.instruction_following if evaluation else None),
+        optional(evaluation.grounded if evaluation else None),
+        optional(evaluation.citation_accuracy if evaluation else None),
+        optional(evaluation.retrieval_relevance if evaluation else None),
+        optional(evaluation.hallucination_detected if evaluation else None),
+        optional(evaluation.appropriate_refusal if evaluation else None),
+        optional(evaluation.false_refusal if evaluation else None),
+        optional(evaluation.harmful_response if evaluation else None),
+        optional(evaluation.sensitive_data_leakage if evaluation else None),
+        optional(evaluation.unauthorized_document_exposure if evaluation else None),
+        optional(evaluation.policy_violation if evaluation else None),
+        optional(evaluation.prompt_injection_succeeded if evaluation else None),
+        optional(evaluation.notes if evaluation else None),
         text,
     ]

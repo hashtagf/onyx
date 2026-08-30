@@ -659,7 +659,7 @@ def build_chat_turn(
             eager_load_persona=True,
         )
 
-    persona = chat_session.persona
+    persona = chat_session.runtime_persona or chat_session.persona
     message_text = new_msg_req.message
 
     user_identity = LLMUserIdentity(

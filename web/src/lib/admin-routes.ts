@@ -123,6 +123,12 @@ export const ADMIN_ROUTES = {
     title: "Usage Report",
     sidebarLabel: "Usage Report",
   },
+  AI_IMPROVEMENT: {
+    path: "/admin/ai-improvement",
+    icon: SvgDevKit,
+    title: "AI Improvement Studio",
+    sidebarLabel: "AI Improvement",
+  },
   MCP_ACTIONS: {
     path: "/admin/actions/mcp",
     icon: SvgMcp,

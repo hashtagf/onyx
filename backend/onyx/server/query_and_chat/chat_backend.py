@@ -597,12 +597,13 @@ def rename_chat_session(
             if naming_model is not None
             else chat_session.llm_override
         )
+        runtime_persona = chat_session.runtime_persona or chat_session.persona
     new_name = _generate_or_fallback_chat_session_name(
         chat_history=full_history,
         request=request,
         user=user,
         chat_session_id=chat_session_id,
-        persona=chat_session.persona,
+        persona=runtime_persona,
         llm_override=naming_override,
     )
 
@@ -1090,7 +1091,8 @@ def get_available_context_tokens_for_session(
     except ValueError:
         raise HTTPException(status_code=404, detail="Chat session not found")
 
-    if not chat_session.persona:
+    runtime_persona = chat_session.runtime_persona or chat_session.persona
+    if not runtime_persona:
         raise HTTPException(status_code=400, detail="Chat session has no persona")
 
     llm_override = (
@@ -1099,7 +1101,7 @@ def get_available_context_tokens_for_session(
         else None
     )
     available = _get_available_tokens_for_persona(
-        persona=chat_session.persona,
+        persona=runtime_persona,
         user=user,
         db_session=db_session,
         llm_override=llm_override,

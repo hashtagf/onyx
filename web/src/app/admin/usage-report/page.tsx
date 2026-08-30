@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import useSWR from "swr";
 import {
   Bar,
@@ -43,6 +43,9 @@ import {
   UsageOverview,
 } from "@/app/admin/usage-report/types";
 import { ADMIN_ROUTES } from "@/lib/admin-routes";
+import QualityDashboard from "@/app/admin/usage-report/QualityDashboard";
+import QualityReviewForm from "@/app/admin/usage-report/QualityReviewForm";
+import QualityReviewQueue from "@/app/admin/usage-report/QualityReviewQueue";
 
 const route = ADMIN_ROUTES.USAGE_REPORT;
 
@@ -129,7 +132,12 @@ function DailyActivityChart({ overview }: { overview: UsageOverview }) {
   );
 }
 
-function SessionDetail({ sessionId }: { sessionId: string }) {
+interface SessionDetailProps {
+  sessionId: string;
+  days: number;
+}
+
+function SessionDetail({ sessionId, days }: SessionDetailProps) {
   const { data: messages, isLoading } = useSWR<ChatHistoryMessage[]>(
     sessionMessagesUrl(sessionId),
     errorHandlingFetcher
@@ -159,11 +167,29 @@ function SessionDetail({ sessionId }: { sessionId: string }) {
               {" · "}
               {new Date(message.time_sent).toLocaleString()}
             </Text>
+            {message.message_type === "assistant" && (
+              <Text text03 secondaryMono>
+                {`${message.processing_duration_seconds?.toFixed(2) ?? "—"}s · ${message.citation_count} citations · ${message.feedback === null ? "no rating" : message.feedback ? "positive rating" : "negative rating"}`}
+              </Text>
+            )}
             <Text text04 mainUiBody className="whitespace-pre-wrap break-words">
               {message.message.length > 1500
                 ? `${message.message.slice(0, 1500)}…`
                 : message.message}
             </Text>
+            {message.error && (
+              <Text text03 secondaryBody className="text-status-error-05">
+                {message.error}
+              </Text>
+            )}
+            {message.message_type === "assistant" && (
+              <QualityReviewForm
+                chatMessageId={message.id}
+                sessionId={sessionId}
+                days={days}
+                evaluation={message.quality_evaluation}
+              />
+            )}
           </Section>
         </Card>
       ))}
@@ -251,6 +277,11 @@ function UsageReportContent() {
           value={`👍 ${overview.feedback_positive} · 👎 ${overview.feedback_negative}`}
         />
       </div>
+
+      {/* AI quality */}
+      <QualityDashboard days={days} />
+
+      <QualityReviewQueue days={days} />
 
       {/* Daily activity */}
       <Card variant="primary">
@@ -399,9 +430,8 @@ function UsageReportContent() {
               </TableHeader>
               <TableBody>
                 {history.entries.map((entry) => (
-                  <>
+                  <Fragment key={entry.session_id}>
                     <TableRow
-                      key={entry.session_id}
                       className="cursor-pointer"
                       onClick={() =>
                         setExpandedSession(
@@ -440,11 +470,14 @@ function UsageReportContent() {
                     {expandedSession === entry.session_id && (
                       <TableRow key={`${entry.session_id}-detail`}>
                         <TableCell colSpan={5}>
-                          <SessionDetail sessionId={entry.session_id} />
+                          <SessionDetail
+                            sessionId={entry.session_id}
+                            days={days}
+                          />
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>

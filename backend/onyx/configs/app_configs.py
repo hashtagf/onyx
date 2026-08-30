@@ -1730,6 +1730,49 @@ SCHEDULED_EVAL_PERMISSIONS_EMAIL = os.environ.get(
 SCHEDULED_EVAL_PROJECT = os.environ.get("SCHEDULED_EVAL_PROJECT", "st-dev")
 
 #####
+# Chat Quality Evaluation
+#####
+ENABLE_CHAT_QUALITY_JUDGE = (
+    os.environ.get("ENABLE_CHAT_QUALITY_JUDGE", "false").lower() == "true"
+)
+CHAT_QUALITY_EXTERNAL_PROCESSING_APPROVED = (
+    os.environ.get("CHAT_QUALITY_EXTERNAL_PROCESSING_APPROVED", "false").lower()
+    == "true"
+)
+CHAT_QUALITY_DISPATCH_INTERVAL_SECONDS = int(
+    os.environ.get("CHAT_QUALITY_DISPATCH_INTERVAL_SECONDS", "900")
+)
+CHAT_QUALITY_BATCH_SIZE = int(os.environ.get("CHAT_QUALITY_BATCH_SIZE", "20"))
+CHAT_QUALITY_DAILY_LIMIT = int(os.environ.get("CHAT_QUALITY_DAILY_LIMIT", "500"))
+CHAT_QUALITY_LOOKBACK_DAYS = int(os.environ.get("CHAT_QUALITY_LOOKBACK_DAYS", "30"))
+CHAT_QUALITY_JUDGE_VERSION = os.environ.get(
+    "CHAT_QUALITY_JUDGE_VERSION", "chat-quality-v1"
+)
+CHAT_QUALITY_RUBRIC_VERSION = os.environ.get(
+    "CHAT_QUALITY_RUBRIC_VERSION", "chat-quality-rubric-v1"
+)
+CHAT_QUALITY_MAX_ATTEMPTS = int(os.environ.get("CHAT_QUALITY_MAX_ATTEMPTS", "3"))
+CHAT_QUALITY_REQUEST_TIMEOUT_SECONDS = int(
+    os.environ.get("CHAT_QUALITY_REQUEST_TIMEOUT_SECONDS", "60")
+)
+CHAT_QUALITY_JOB_STALE_SECONDS = int(
+    os.environ.get("CHAT_QUALITY_JOB_STALE_SECONDS", "300")
+)
+CHAT_QUALITY_REVIEW_CLAIM_MINUTES = int(
+    os.environ.get("CHAT_QUALITY_REVIEW_CLAIM_MINUTES", "30")
+)
+CHAT_QUALITY_HUMAN_SAMPLE_RATE = float(
+    os.environ.get("CHAT_QUALITY_HUMAN_SAMPLE_RATE", "0.05")
+)
+CHAT_QUALITY_HIGH_RISK_CATEGORIES = {
+    category.strip().lower()
+    for category in os.environ.get(
+        "CHAT_QUALITY_HIGH_RISK_CATEGORIES", "legal,financial,medical,security"
+    ).split(",")
+    if category.strip()
+}
+
+#####
 # Langfuse Configuration
 #####
 # Langfuse API credentials - if provided, Langfuse tracing will be enabled

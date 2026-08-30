@@ -113,6 +113,7 @@ from onyx.server.features.web_search.api import router as web_search_router
 from onyx.server.federated.api import router as federated_router
 from onyx.server.kg.api import admin_router as kg_admin_router
 from onyx.server.manage.administrative import router as admin_router
+from onyx.server.manage.ai_improvement.api import router as ai_improvement_router
 from onyx.server.manage.code_interpreter.api import (
     admin_router as code_interpreter_admin_router,
 )
@@ -563,6 +564,7 @@ def get_application(lifespan_override: Lifespan | None = None) -> FastAPI:
     include_router_with_global_prefix_prepended(application, line_bot_router)
     include_router_with_global_prefix_prepended(application, line_webhook_router)
     include_router_with_global_prefix_prepended(application, usage_insights_router)
+    include_router_with_global_prefix_prepended(application, ai_improvement_router)
     include_router_with_global_prefix_prepended(application, service_accounts_router)
     include_router_with_global_prefix_prepended(application, persona_router)
     include_router_with_global_prefix_prepended(application, admin_persona_router)

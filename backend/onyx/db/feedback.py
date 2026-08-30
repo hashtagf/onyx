@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, aliased
 
 from onyx.configs.constants import MessageType, SearchFeedbackType
 from onyx.db.chat import get_chat_message
+from onyx.db.chat_quality import ensure_negative_feedback_review_queue_item
 from onyx.db.enums import AccessType
 from onyx.db.models import (
     ChatMessageFeedback,
@@ -248,6 +249,8 @@ def create_chat_message_feedback(
 
     db_session.add(message_feedback)
     db_session.commit()
+    if is_positive is False:
+        ensure_negative_feedback_review_queue_item(db_session, chat_message_id)
 
 
 def remove_chat_message_feedback(

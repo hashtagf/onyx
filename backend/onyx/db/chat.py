@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Tuple
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from sqlalchemy import Row, delete, desc, func, nullsfirst, or_, select, update
@@ -13,6 +13,7 @@ from onyx.configs.chat_configs import HARD_DELETE_CHATS
 from onyx.configs.constants import MessageType
 from onyx.context.search.models import InferenceSection, SavedSearchDoc
 from onyx.context.search.models import SearchDoc as ServerSearchDoc
+from onyx.db.ai_improvement import choose_configuration_version_for_session
 from onyx.db.enums import IncognitoRecordMode, record_mode_persists_content
 from onyx.db.models import (
     ChatMessage,
@@ -51,6 +52,13 @@ def get_chat_session_by_id(
     if eager_load_persona:
         stmt = stmt.options(
             joinedload(ChatSession.persona).options(
+                selectinload(Persona.tools),
+                selectinload(Persona.user_files),
+                selectinload(Persona.document_sets),
+                selectinload(Persona.attached_documents),
+                selectinload(Persona.hierarchy_nodes),
+            ),
+            joinedload(ChatSession.runtime_persona).options(
                 selectinload(Persona.tools),
                 selectinload(Persona.user_files),
                 selectinload(Persona.document_sets),
@@ -253,12 +261,29 @@ def create_chat_session(
     incognito_record_mode: IncognitoRecordMode | None = None,
     session_id: UUID | None = None,
 ) -> ChatSession:
+    resolved_session_id = session_id or uuid4()
+    configuration_version = (
+        choose_configuration_version_for_session(
+            db_session,
+            persona_id=persona_id,
+            user_id=user_id,
+            session_id=resolved_session_id,
+        )
+        if persona_id is not None
+        else None
+    )
     chat_session = ChatSession(
         # Caller-supplied only for incognito, where uploads name the session
         # before it exists so the server can verify them.
-        **({"id": session_id} if session_id is not None else {}),
+        id=resolved_session_id,
         user_id=user_id,
         persona_id=persona_id,
+        ai_configuration_version_id=(
+            configuration_version.id if configuration_version else None
+        ),
+        runtime_persona_id=(
+            configuration_version.runtime_persona_id if configuration_version else None
+        ),
         description=description,
         llm_override=llm_override,
         prompt_override=prompt_override,
@@ -632,6 +657,16 @@ def get_chat_messages_by_session(
     return list(result)
 
 
+def _configuration_version_for_session(
+    db_session: Session, chat_session_id: UUID
+) -> int | None:
+    return db_session.scalar(
+        select(ChatSession.ai_configuration_version_id).where(
+            ChatSession.id == chat_session_id
+        )
+    )
+
+
 def get_or_create_root_message(
     chat_session_id: UUID,
     db_session: Session,
@@ -655,6 +690,9 @@ def get_or_create_root_message(
     else:
         new_root_message = ChatMessage(
             chat_session_id=chat_session_id,
+            ai_configuration_version_id=_configuration_version_for_session(
+                db_session, chat_session_id
+            ),
             parent_message_id=None,
             latest_child_message_id=None,
             message="",
@@ -676,6 +714,9 @@ def reserve_message_id(
     # Create an temporary holding chat message to the updated and saved at the end
     empty_message = ChatMessage(
         chat_session_id=chat_session_id,
+        ai_configuration_version_id=_configuration_version_for_session(
+            db_session, chat_session_id
+        ),
         parent_message_id=parent_message,
         latest_child_message_id=None,
         message="Response was terminated prior to completion, try regenerating.",
@@ -718,6 +759,9 @@ def reserve_multi_model_message_ids(
     for display_name in model_display_names:
         msg = ChatMessage(
             chat_session_id=chat_session_id,
+            ai_configuration_version_id=_configuration_version_for_session(
+                db_session, chat_session_id
+            ),
             parent_message_id=parent_message_id,
             latest_child_message_id=None,
             message="Response was terminated prior to completion, try regenerating.",
@@ -800,6 +844,9 @@ def create_new_chat_message(
     reserved_message_id: int | None = None,
     reasoning_tokens: str | None = None,
 ) -> ChatMessage:
+    configuration_version_id = _configuration_version_for_session(
+        db_session, chat_session_id
+    )
     if reserved_message_id is not None:
         # Edit existing message
         existing_message = db_session.query(ChatMessage).get(reserved_message_id)
@@ -814,11 +861,13 @@ def create_new_chat_message(
         existing_message.files = files
         existing_message.error = error
         existing_message.reasoning_tokens = reasoning_tokens
+        existing_message.ai_configuration_version_id = configuration_version_id
         new_chat_message = existing_message
     else:
         # Create new message
         new_chat_message = ChatMessage(
             chat_session_id=chat_session_id,
+            ai_configuration_version_id=configuration_version_id,
             parent_message_id=parent_message.id,
             latest_child_message_id=None,
             message=message,

@@ -3072,6 +3072,12 @@ class ChatSession(Base):
     persona_id: Mapped[int | None] = mapped_column(
         ForeignKey("persona.id"), nullable=True
     )
+    ai_configuration_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_configuration_version.id", ondelete="SET NULL"), nullable=True
+    )
+    runtime_persona_id: Mapped[int | None] = mapped_column(
+        ForeignKey("persona.id", ondelete="SET NULL"), nullable=True
+    )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # This chat created by OnyxBot
     onyxbot_flow: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -3153,7 +3159,13 @@ class ChatSession(Base):
     artifacts: Mapped[list["Artifact"]] = relationship(
         "Artifact", back_populates="chat_session", cascade="all, delete-orphan"
     )
-    persona: Mapped["Persona"] = relationship("Persona")
+    persona: Mapped["Persona"] = relationship("Persona", foreign_keys=[persona_id])
+    runtime_persona: Mapped["Persona | None"] = relationship(
+        "Persona", foreign_keys=[runtime_persona_id]
+    )
+    ai_configuration_version: Mapped["AIConfigurationVersion | None"] = relationship(
+        "AIConfigurationVersion", foreign_keys=[ai_configuration_version_id]
+    )
 
 
 class ChatMessage(Base):
@@ -3206,6 +3218,9 @@ class ChatMessage(Base):
 
     # The display name of the model that generated this assistant message
     model_display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    ai_configuration_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_configuration_version.id", ondelete="SET NULL"), nullable=True
+    )
 
     # What does this message contain
     reasoning_tokens: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -3246,6 +3261,31 @@ class ChatMessage(Base):
     chat_message_feedbacks: Mapped[list["ChatMessageFeedback"]] = relationship(
         "ChatMessageFeedback",
         back_populates="chat_message",
+    )
+
+    quality_evaluations: Mapped[list["ChatMessageQualityEvaluation"]] = relationship(
+        "ChatMessageQualityEvaluation",
+        back_populates="chat_message",
+        cascade="all, delete-orphan",
+    )
+
+    quality_evaluation_jobs: Mapped[list["ChatQualityEvaluationJob"]] = relationship(
+        "ChatQualityEvaluationJob",
+        back_populates="chat_message",
+        cascade="all, delete-orphan",
+    )
+
+    quality_review_queue_item: Mapped["ChatQualityReviewQueueItem | None"] = (
+        relationship(
+            "ChatQualityReviewQueueItem",
+            back_populates="chat_message",
+            cascade="all, delete-orphan",
+            uselist=False,
+        )
+    )
+
+    ai_configuration_version: Mapped["AIConfigurationVersion | None"] = relationship(
+        "AIConfigurationVersion", foreign_keys=[ai_configuration_version_id]
     )
 
     document_feedbacks: Mapped[list["DocumentRetrievalFeedback"]] = relationship(
@@ -3487,6 +3527,464 @@ class ChatMessageFeedback(Base):
         "ChatMessage",
         back_populates="chat_message_feedbacks",
         foreign_keys=[chat_message_id],
+    )
+
+
+class ChatMessageQualityEvaluation(Base):
+    """A human or judge-model review of one assistant response."""
+
+    __tablename__ = "chat_message_quality_evaluation"
+    __table_args__ = (
+        UniqueConstraint(
+            "chat_message_id",
+            "evaluation_source",
+            name="uq_chat_quality_evaluation_message_source",
+        ),
+        CheckConstraint(
+            "evaluation_source IN ('human', 'llm_judge')",
+            name="ck_chat_quality_evaluation_source",
+        ),
+        CheckConstraint(
+            "correctness IS NULL OR correctness BETWEEN 1 AND 5",
+            name="ck_chat_quality_correctness_score",
+        ),
+        CheckConstraint(
+            "relevance IS NULL OR relevance BETWEEN 1 AND 5",
+            name="ck_chat_quality_relevance_score",
+        ),
+        CheckConstraint(
+            "completeness IS NULL OR completeness BETWEEN 1 AND 5",
+            name="ck_chat_quality_completeness_score",
+        ),
+        CheckConstraint(
+            "clarity IS NULL OR clarity BETWEEN 1 AND 5",
+            name="ck_chat_quality_clarity_score",
+        ),
+        CheckConstraint(
+            "instruction_following IS NULL OR instruction_following BETWEEN 1 AND 5",
+            name="ck_chat_quality_instruction_following_score",
+        ),
+        CheckConstraint(
+            "citation_accuracy IS NULL OR citation_accuracy BETWEEN 1 AND 5",
+            name="ck_chat_quality_citation_accuracy_score",
+        ),
+        CheckConstraint(
+            "retrieval_relevance IS NULL OR retrieval_relevance BETWEEN 1 AND 5",
+            name="ck_chat_quality_retrieval_relevance_score",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_message_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_message.id", ondelete="CASCADE"), nullable=False
+    )
+    reviewer_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    evaluation_source: Mapped[str] = mapped_column(
+        String, nullable=False, default="human"
+    )
+    judge_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    judge_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    rubric_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    task_category: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    task_success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    first_answer_resolution: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    required_rephrase: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    correctness: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    relevance: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completeness: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    clarity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    instruction_following: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    grounded: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    citation_accuracy: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retrieval_relevance: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hallucination_detected: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    appropriate_refusal: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    false_refusal: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    harmful_response: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    sensitive_data_leakage: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    unauthorized_document_exposure: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True
+    )
+    policy_violation: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    prompt_injection_succeeded: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True
+    )
+
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time_created: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    time_updated: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    chat_message: Mapped[ChatMessage] = relationship(
+        "ChatMessage", back_populates="quality_evaluations"
+    )
+    reviewer: Mapped[User | None] = relationship("User")
+
+
+class ChatQualityEvaluationJob(Base):
+    """Durable work state for one response and judge version."""
+
+    __tablename__ = "chat_quality_evaluation_job"
+    __table_args__ = (
+        UniqueConstraint(
+            "chat_message_id",
+            "judge_version",
+            name="uq_chat_quality_job_message_judge_version",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed', 'skipped')",
+            name="ck_chat_quality_job_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_message_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_message.id", ondelete="CASCADE"), nullable=False
+    )
+    judge_version: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claimed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    time_created: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    time_updated: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    chat_message: Mapped[ChatMessage] = relationship(
+        "ChatMessage", back_populates="quality_evaluation_jobs"
+    )
+
+
+class ChatQualityReviewQueueItem(Base):
+    """Human-review work for one assistant response."""
+
+    __tablename__ = "chat_quality_review_queue_item"
+    __table_args__ = (
+        UniqueConstraint(
+            "chat_message_id", name="uq_chat_quality_review_queue_message"
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'claimed', 'completed', 'skipped')",
+            name="ck_chat_quality_review_queue_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_message_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_message.id", ondelete="CASCADE"), nullable=False
+    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reasons: Mapped[list[str]] = mapped_column(
+        postgresql.JSONB(), nullable=False, default=list
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    assigned_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    claim_expires_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    root_cause: Mapped[str | None] = mapped_column(String, nullable=True)
+    skip_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    time_created: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    time_updated: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    chat_message: Mapped[ChatMessage] = relationship(
+        "ChatMessage", back_populates="quality_review_queue_item"
+    )
+    assigned_user: Mapped[User | None] = relationship("User")
+
+
+class AIConfigurationVersion(Base):
+    """Immutable Agent or Skill configuration used for evaluation and release."""
+
+    __tablename__ = "ai_configuration_version"
+    __table_args__ = (
+        UniqueConstraint(
+            "target_type",
+            "target_id",
+            "version_number",
+            name="uq_ai_configuration_target_version",
+        ),
+        CheckConstraint(
+            "target_type IN ('agent', 'custom_skill', 'builtin_skill')",
+            name="ck_ai_configuration_target_type",
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'evaluating', 'approved', 'canary', "
+            "'production', 'rejected', 'archived')",
+            name="ck_ai_configuration_status",
+        ),
+        Index(
+            "uq_ai_configuration_production_target",
+            "target_type",
+            "target_id",
+            unique=True,
+            postgresql_where=text("status = 'production'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    target_type: Mapped[str] = mapped_column(String, nullable=False)
+    target_id: Mapped[str] = mapped_column(String, nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
+    base_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_configuration_version.id", ondelete="SET NULL"), nullable=True
+    )
+    runtime_persona_id: Mapped[int | None] = mapped_column(
+        ForeignKey("persona.id", ondelete="SET NULL"), nullable=True
+    )
+    configuration: Mapped[dict[str, Any]] = mapped_column(
+        postgresql.JSONB(), nullable=False
+    )
+    source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    change_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    approved_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    approved_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    activated_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    time_created: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    base_version: Mapped["AIConfigurationVersion | None"] = relationship(
+        "AIConfigurationVersion", remote_side=[id], foreign_keys=[base_version_id]
+    )
+    created_by_user: Mapped[User | None] = relationship(
+        "User", foreign_keys=[created_by_user_id]
+    )
+    approved_by_user: Mapped[User | None] = relationship(
+        "User", foreign_keys=[approved_by_user_id]
+    )
+    runtime_persona: Mapped["Persona | None"] = relationship(
+        "Persona", foreign_keys=[runtime_persona_id]
+    )
+
+
+class AIImprovementItem(Base):
+    __tablename__ = "ai_improvement_item"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('open', 'in_progress', 'evaluating', 'completed', 'rejected')",
+            name="ck_ai_improvement_item_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    root_cause: Mapped[str | None] = mapped_column(String, nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    owner_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    target_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    target_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_message_ids: Mapped[list[int]] = mapped_column(
+        postgresql.JSONB(), nullable=False, default=list
+    )
+    expected_outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time_created: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    time_updated: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    owner_user: Mapped[User | None] = relationship("User")
+
+
+class AIEvaluationDataset(Base):
+    __tablename__ = "ai_evaluation_dataset"
+    __table_args__ = (
+        UniqueConstraint("name", "version", name="uq_ai_evaluation_dataset_version"),
+        CheckConstraint(
+            "status IN ('draft', 'frozen', 'archived')",
+            name="ck_ai_evaluation_dataset_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    time_created: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    cases: Mapped[list["AIEvaluationDatasetCase"]] = relationship(
+        "AIEvaluationDatasetCase", cascade="all, delete-orphan"
+    )
+
+
+class AIEvaluationDatasetCase(Base):
+    __tablename__ = "ai_evaluation_dataset_case"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dataset_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_evaluation_dataset.id", ondelete="CASCADE"), nullable=False
+    )
+    input_text: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
+    task_category: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_message.id", ondelete="SET NULL"), nullable=True
+    )
+    is_masked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    case_metadata: Mapped[dict[str, Any]] = mapped_column(
+        postgresql.JSONB(), nullable=False, default=dict
+    )
+
+
+class AIEvaluationRun(Base):
+    __tablename__ = "ai_evaluation_run"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed', 'invalid')",
+            name="ck_ai_evaluation_run_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    candidate_version_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_configuration_version.id", ondelete="CASCADE"), nullable=False
+    )
+    baseline_version_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_configuration_version.id", ondelete="CASCADE"), nullable=False
+    )
+    dataset_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_evaluation_dataset.id", ondelete="RESTRICT"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    gates_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    summary: Mapped[dict[str, Any]] = mapped_column(
+        postgresql.JSONB(), nullable=False, default=dict
+    )
+    time_created: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    time_completed: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class AIEvaluationResult(Base):
+    __tablename__ = "ai_evaluation_result"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "case_id", "variant", name="uq_ai_evaluation_result_variant"
+        ),
+        CheckConstraint(
+            "variant IN ('baseline', 'candidate')",
+            name="ck_ai_evaluation_result_variant",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_evaluation_run.id", ondelete="CASCADE"), nullable=False
+    )
+    case_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_evaluation_dataset_case.id", ondelete="CASCADE"), nullable=False
+    )
+    variant: Mapped[str] = mapped_column(String, nullable=False)
+    output_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metrics: Mapped[dict[str, Any]] = mapped_column(
+        postgresql.JSONB(), nullable=False, default=dict
+    )
+    latency_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    estimated_cost_cents: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class AICanaryRelease(Base):
+    __tablename__ = "ai_canary_release"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'running', 'stopped', 'promoted', 'failed')",
+            name="ck_ai_canary_release_status",
+        ),
+        CheckConstraint(
+            "traffic_percentage > 0 AND traffic_percentage <= 100",
+            name="ck_ai_canary_release_percentage",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    candidate_version_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_configuration_version.id", ondelete="CASCADE"), nullable=False
+    )
+    baseline_version_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_configuration_version.id", ondelete="CASCADE"), nullable=False
+    )
+    evaluation_run_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_evaluation_run.id", ondelete="RESTRICT"), nullable=False
+    )
+    traffic_percentage: Mapped[float] = mapped_column(Float, nullable=False)
+    eligible_scope: Mapped[dict[str, Any]] = mapped_column(
+        postgresql.JSONB(), nullable=False, default=dict
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    approved_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    automatic_stop_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time_started: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    time_stopped: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

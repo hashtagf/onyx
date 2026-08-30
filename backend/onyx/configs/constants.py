@@ -464,6 +464,7 @@ class OnyxCeleryQueues:
     CONNECTOR_EXTERNAL_GROUP_SYNC = "connector_external_group_sync"
     CONNECTOR_HIERARCHY_FETCHING = "connector_hierarchy_fetching"
     CSV_GENERATION = "csv_generation"
+    QUALITY_EVALUATION = "quality_evaluation"
 
     # Chat retention (TTL) hard-deletion queue, consumed by the light worker.
     # Kept off the primary "celery" queue so cleanup never starves check_for_indexing.
@@ -688,6 +689,8 @@ class OnyxCeleryTask:
 
     EVAL_RUN_TASK = "eval_run_task"
     SCHEDULED_EVAL_TASK = "scheduled_eval_task"
+    CHAT_QUALITY_DISPATCH = "chat_quality_dispatch"
+    CHAT_QUALITY_EVALUATE = "chat_quality_evaluate"
 
     EXPORT_QUERY_HISTORY_TASK = "export_query_history_task"
     EXPORT_QUERY_HISTORY_CLEANUP_TASK = "export_query_history_cleanup_task"

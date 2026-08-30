@@ -4,6 +4,34 @@ export function overviewUrl(days: number): string {
   return `${BASE_URL}/overview?days=${days}`;
 }
 
+export function qualityOverviewUrl(days: number): string {
+  return `${BASE_URL}/quality-overview?days=${days}`;
+}
+
+export function qualityEvaluationUrl(chatMessageId: number): string {
+  return `${BASE_URL}/quality-evaluations/${chatMessageId}`;
+}
+
+export function qualityReviewQueueUrl(
+  status: string,
+  page = 1,
+  pageSize = 20
+): string {
+  const params = new URLSearchParams({
+    status,
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  return `${BASE_URL}/quality-review-queue?${params.toString()}`;
+}
+
+export function qualityReviewQueueActionUrl(
+  queueItemId: number,
+  action: "claim" | "release" | "skip"
+): string {
+  return `${BASE_URL}/quality-review-queue/${queueItemId}/${action}`;
+}
+
 export function chatHistoryUrl(
   days: number,
   page: number,

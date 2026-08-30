@@ -7,8 +7,11 @@ from celery.schedules import crontab
 from onyx.configs.app_configs import (
     AUTO_LLM_CONFIG_URL,
     AUTO_LLM_UPDATE_INTERVAL_SECONDS,
+    CHAT_QUALITY_DISPATCH_INTERVAL_SECONDS,
+    CHAT_QUALITY_EXTERNAL_PROCESSING_APPROVED,
     DISABLE_OPENSEARCH_MIGRATION_TASK,
     DISABLE_VECTOR_DB,
+    ENABLE_CHAT_QUALITY_JUDGE,
     ENABLE_OPENSEARCH_INDEXING_FOR_ONYX,
     ENTERPRISE_EDITION_ENABLED,
     ONYX_DISABLE_VESPA,
@@ -281,6 +284,22 @@ if SCHEDULED_EVAL_DATASET_NAMES:
             "options": {
                 "priority": OnyxCeleryPriority.LOW,
                 "expires": BEAT_EXPIRES_DEFAULT,
+            },
+        }
+    )
+
+# Chat quality evaluation can send stored chat content to the configured LLM.
+# Schedule it only when both the feature and policy approval are explicit.
+if ENABLE_CHAT_QUALITY_JUDGE and CHAT_QUALITY_EXTERNAL_PROCESSING_APPROVED:
+    beat_task_templates.append(
+        {
+            "name": "dispatch-chat-quality-evaluations",
+            "task": OnyxCeleryTask.CHAT_QUALITY_DISPATCH,
+            "schedule": timedelta(seconds=CHAT_QUALITY_DISPATCH_INTERVAL_SECONDS),
+            "options": {
+                "priority": OnyxCeleryPriority.LOW,
+                "expires": CHAT_QUALITY_DISPATCH_INTERVAL_SECONDS,
+                "queue": OnyxCeleryQueues.PRIMARY,
             },
         }
     )
