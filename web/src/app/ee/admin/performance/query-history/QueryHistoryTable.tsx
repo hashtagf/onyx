@@ -26,7 +26,10 @@ import { ErrorCallout } from "@/components/ErrorCallout";
 import { errorHandlingFetcher } from "@/lib/fetcher";
 import useSWR from "swr";
 import { TaskQueueState } from "@/app/ee/admin/performance/query-history/types";
-import { withRequestId } from "@/app/ee/admin/performance/query-history/utils";
+import {
+  truncateQueryHistoryPreview,
+  withRequestId,
+} from "@/app/ee/admin/performance/query-history/utils";
 import {
   DOWNLOAD_QUERY_HISTORY_URL,
   LIST_QUERY_HISTORY_URL,
@@ -57,16 +60,20 @@ function QueryHistoryTableRow({
       key={chatSessionMinimal.id}
       className="hover:bg-accent-background cursor-pointer relative select-none"
     >
-      <TableCell className="max-w-xs">
-        <Text className="whitespace-normal line-clamp-5">
-          {chatSessionMinimal.first_user_message ||
-            chatSessionMinimal.name ||
-            "-"}
+      <TableCell className="max-w-0 overflow-hidden">
+        <Text className="line-clamp-5 whitespace-normal break-words">
+          {truncateQueryHistoryPreview(
+            chatSessionMinimal.first_user_message ||
+              chatSessionMinimal.name ||
+              "-"
+          )}
         </Text>
       </TableCell>
-      <TableCell>
-        <Text className="whitespace-normal line-clamp-5">
-          {chatSessionMinimal.first_ai_message || "-"}
+      <TableCell className="max-w-0 overflow-hidden">
+        <Text className="line-clamp-5 whitespace-normal break-words">
+          {truncateQueryHistoryPreview(
+            chatSessionMinimal.first_ai_message || "-"
+          )}
         </Text>
       </TableCell>
       <TableCell>
@@ -315,15 +322,15 @@ export function QueryHistoryTable({
         </div>
         <Divider />
         <Section>
-          <Table className="mt-5">
+          <Table className="mt-5 min-w-[960px] table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead>First User Message</TableHead>
-                <TableHead>First AI Response</TableHead>
-                <TableHead>Feedback</TableHead>
-                <TableHead>User</TableHead>
-                <TableHead>Persona</TableHead>
-                <TableHead>Date</TableHead>
+                <TableHead className="w-[22%]">First User Message</TableHead>
+                <TableHead className="w-[28%]">First AI Response</TableHead>
+                <TableHead className="w-[8%]">Feedback</TableHead>
+                <TableHead className="w-[16%]">User</TableHead>
+                <TableHead className="w-[14%]">Persona</TableHead>
+                <TableHead className="w-[12%]">Date</TableHead>
               </TableRow>
             </TableHeader>
             {isLoading ? (

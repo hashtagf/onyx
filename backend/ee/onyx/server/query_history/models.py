@@ -10,6 +10,15 @@ from onyx.configs.constants import MessageType, QAFeedbackType, SessionType
 from onyx.db.enums import TaskStatus
 from onyx.db.models import ChatMessage, ChatSession, FileRecord, TaskQueueState
 
+QUERY_HISTORY_PREVIEW_MAX_CHARS = 1000
+
+
+def truncate_query_history_preview(message: str) -> str:
+    if len(message) <= QUERY_HISTORY_PREVIEW_MAX_CHARS:
+        return message
+
+    return message[: QUERY_HISTORY_PREVIEW_MAX_CHARS - 1] + "…"
+
 
 class AbridgedSearchDoc(BaseModel):
     """A subset of the info present in `SearchDoc`"""
@@ -82,21 +91,25 @@ class ChatSessionMinimal(BaseModel):
 
     @classmethod
     def from_chat_session(cls, chat_session: ChatSession) -> "ChatSessionMinimal":
-        first_user_message = next(
-            (
-                message.message
-                for message in chat_session.messages
-                if message.message_type == MessageType.USER
-            ),
-            "",
+        first_user_message = truncate_query_history_preview(
+            next(
+                (
+                    message.message
+                    for message in chat_session.messages
+                    if message.message_type == MessageType.USER
+                ),
+                "",
+            )
         )
-        first_ai_message = next(
-            (
-                message.message
-                for message in chat_session.messages
-                if message.message_type == MessageType.ASSISTANT
-            ),
-            "",
+        first_ai_message = truncate_query_history_preview(
+            next(
+                (
+                    message.message
+                    for message in chat_session.messages
+                    if message.message_type == MessageType.ASSISTANT
+                ),
+                "",
+            )
         )
 
         list_of_message_feedbacks = [
