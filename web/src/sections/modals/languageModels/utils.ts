@@ -136,6 +136,8 @@ export interface BaseLLMFormValues {
  * - Otherwise, models that already exist in the form keep their prior
  *   `is_visible` value, and newly-discovered models are added unselected so
  *   the user can opt-in explicitly.
+ * - A prior `supports_image_input: true` is kept. Gateways that do not report
+ *   model capabilities return `false`, which must not clear an admin's choice.
  */
 export function mergeFetchedModelConfigurations(
   fetched: ModelConfiguration[],
@@ -145,7 +147,13 @@ export function mergeFetchedModelConfigurations(
   const priorByName = new Map(existing.map((m) => [m.name, m]));
   return fetched.map((model) => {
     const prior = priorByName.get(model.name);
-    return { ...model, is_visible: prior ? prior.is_visible : false };
+    if (!prior) return { ...model, is_visible: false };
+    return {
+      ...model,
+      is_visible: prior.is_visible,
+      supports_image_input:
+        model.supports_image_input || prior.supports_image_input,
+    };
   });
 }
 

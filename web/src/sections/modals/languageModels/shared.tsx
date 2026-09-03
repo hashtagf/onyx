@@ -37,6 +37,8 @@ import {
 import {
   SvgArrowExchange,
   SvgChevronDown,
+  SvgEye,
+  SvgEyeOff,
   SvgOnyxOctagon,
   SvgOrganization,
   SvgPlusCircle,
@@ -508,8 +510,31 @@ function buildModelDescription(model: ModelConfiguration): string | undefined {
   return parts.length > 0 ? parts.join("  ·  ") : undefined;
 }
 
-/** Eye marker for vision models, shown on the right of the picker row. */
-function modelRightChildren(model: ModelConfiguration): React.ReactNode {
+/** Eye marker for vision models, shown on the right of the picker row. When
+ *  `onToggleImageInput` is given the marker becomes a toggle so admins can set
+ *  the flag for gateways that do not report model capabilities. */
+function modelRightChildren(
+  model: ModelConfiguration,
+  onToggleImageInput?: (enabled: boolean) => void
+): React.ReactNode {
+  if (onToggleImageInput) {
+    const enabled = model.supports_image_input;
+    return (
+      <Button
+        size="sm"
+        prominence={enabled ? "secondary" : "tertiary"}
+        icon={enabled ? SvgEye : SvgEyeOff}
+        title={enabled ? "Vision enabled" : "Vision disabled"}
+        aria-pressed={enabled}
+        onClick={(e: React.MouseEvent) => {
+          e.stopPropagation();
+          onToggleImageInput(!enabled);
+        }}
+      >
+        Vision
+      </Button>
+    );
+  }
   if (!hasModelMetadata(model) || !model.supports_image_input) return undefined;
   return (
     <Text secondaryBody text03 title="Vision">
@@ -523,6 +548,7 @@ interface ModelRowProps {
   isAutoMode: boolean;
   onToggleVisibility: (visible: boolean) => void;
   onRename: (value: string | undefined) => void;
+  onToggleImageInput?: (enabled: boolean) => void;
 }
 
 /**
@@ -543,6 +569,7 @@ function ModelRow({
   isAutoMode,
   onToggleVisibility,
   onRename,
+  onToggleImageInput,
 }: ModelRowProps) {
   const displayName =
     model.custom_display_name || model.display_name || model.name;
@@ -581,7 +608,7 @@ function ModelRow({
               icon={() => <Checkbox checked={isSelected} />}
               title={displayName}
               description={buildModelDescription(model)}
-              rightChildren={modelRightChildren(model)}
+              rightChildren={modelRightChildren(model, onToggleImageInput)}
               editable
               onTitleChange={(newTitle) => onRename(newTitle || undefined)}
               padding={0}
@@ -600,12 +627,16 @@ export interface ModelSelectionFieldProps {
   onAddModel?: (modelName: string) => void;
   /** Overrides the empty-state copy shown when no models are loaded. */
   emptyMessage?: string;
+  /** Called when the user toggles a model's image input support. Enables the
+   *  per-row "Vision" toggle. */
+  onToggleImageInput?: (modelName: string, enabled: boolean) => void;
 }
 export function ModelSelectionField({
   shouldShowAutoUpdateToggle,
   onRefetch,
   onAddModel,
   emptyMessage,
+  onToggleImageInput,
 }: ModelSelectionFieldProps) {
   const formikProps = useFormikContext<BaseLLMFormValues>();
   const [newModelName, setNewModelName] = useState("");
@@ -727,6 +758,11 @@ export function ModelSelectionField({
                       }
                       onRename={(value) =>
                         setCustomDisplayName(model.name, value)
+                      }
+                      onToggleImageInput={
+                        onToggleImageInput
+                          ? (enabled) => onToggleImageInput(model.name, enabled)
+                          : undefined
                       }
                     />
                   ))}

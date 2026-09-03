@@ -68,6 +68,15 @@ function OpenAICompatibleModalInternals({
     );
   };
 
+  const handleToggleImageInput = (modelName: string, enabled: boolean) => {
+    formikProps.setFieldValue(
+      "model_configurations",
+      formikProps.values.model_configurations.map((m) =>
+        m.name === modelName ? { ...m, supports_image_input: enabled } : m
+      )
+    );
+  };
+
   return (
     <>
       <APIBaseField
@@ -91,6 +100,7 @@ function OpenAICompatibleModalInternals({
       <ModelSelectionField
         shouldShowAutoUpdateToggle={false}
         onRefetch={isFetchDisabled ? undefined : handleFetchModels}
+        onToggleImageInput={handleToggleImageInput}
       />
 
       {!isOnboarding && (
