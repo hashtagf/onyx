@@ -106,33 +106,37 @@ if (!indexes.length) {
   throw new Error("Pinecone has no indexes");
 }
 
-let integratedIndex;
+let searchableIndex;
+let searchableNamespace;
 for (const index of indexes) {
   const description = await callTool("describe-index", { name: index.name });
-  if (description?.embed && description?.status?.ready) {
-    integratedIndex = description;
+  const supportsConfiguredEmbedding =
+    description?.embed || description?.dimension === 1024;
+  if (!description?.status?.ready || !supportsConfiguredEmbedding) {
+    continue;
+  }
+
+  const stats = await callTool("describe-index-stats", {
+    name: description.name,
+  });
+  const namespaces = Object.entries(stats?.namespaces ?? {}).sort(
+    ([, left], [, right]) =>
+      (right?.recordCount ?? 0) - (left?.recordCount ?? 0)
+  );
+  const [namespace = "", namespaceStats] = namespaces[0] ?? [];
+  if ((namespaceStats?.recordCount ?? 0) > 0) {
+    searchableIndex = description;
+    searchableNamespace = namespace;
     break;
   }
 }
-if (!integratedIndex) {
-  throw new Error("Pinecone has no ready integrated-inference index");
-}
-
-const stats = await callTool("describe-index-stats", {
-  name: integratedIndex.name,
-});
-const namespaces = Object.entries(stats?.namespaces ?? {}).sort(
-  ([, left], [, right]) =>
-    (right?.recordCount ?? 0) - (left?.recordCount ?? 0)
-);
-const [namespace = "", namespaceStats] = namespaces[0] ?? [];
-if ((namespaceStats?.recordCount ?? 0) === 0) {
-  throw new Error("Pinecone integrated-inference index has no records");
+if (!searchableIndex) {
+  throw new Error("Pinecone has no ready populated index with a compatible embedding");
 }
 
 const search = await callTool("search-records", {
-  name: integratedIndex.name,
-  namespace,
+  name: searchableIndex.name,
+  namespace: searchableNamespace,
   query: {
     topK: 3,
     inputs: { text: SEARCH_TEXT },
