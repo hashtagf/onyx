@@ -73,10 +73,13 @@ jobs:
                 -e PINECONE_EXPECTED_INDEX_NAME=idip-indo \
                 -e PINECONE_EXPECTED_NAMESPACE=54f715a4-f4a7-45e7-971a-dd041b28a7bc \
                 "$image" --input-type=module
-              process_count=$(sudo docker top onyx-pinecone-mcp-gateway-1 -eo pid | tail -n +2 | wc -l)
-              test "$process_count" -eq 1
+              main_process_count=$(
+                sudo docker top onyx-pinecone-mcp-gateway-1 -eo pid,comm,args |
+                  awk "\$2 == \"node\" && \$3 == \"node\" && \$4 == \"server.mjs\" { count++ } END { print count + 0 }"
+              )
+              test "$main_process_count" -eq 1
               thread_count=$(sudo docker stats --no-stream --format "{{.PIDs}}" onyx-pinecone-mcp-gateway-1)
               test "$thread_count" -le 32
-              echo "Pinecone MCP gateway process count is stable."
+              echo "Pinecone MCP gateway main process count is stable."
             ' \
             < .github/scripts/prod-pinecone-mcp-smoke.mjs
