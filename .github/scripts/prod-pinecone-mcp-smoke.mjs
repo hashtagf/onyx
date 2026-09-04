@@ -84,28 +84,6 @@ async function callTool(name, args = {}) {
   return JSON.parse(text);
 }
 
-async function probeStandardIndex({ name, namespace, query, dimension }) {
-  const { Pinecone } = await import("@pinecone-database/pinecone");
-  const client = new Pinecone();
-  const embeddings = await client.inference.embed({
-    model: "multilingual-e5-large",
-    inputs: [query.inputs.text],
-    parameters: { inputType: "query", truncate: "END" },
-  });
-  const vector = embeddings?.data?.[0]?.values;
-  if (!Array.isArray(vector) || vector.length !== dimension) {
-    throw new Error("The standard-index adapter produced an incompatible embedding");
-  }
-
-  const response = await client.index(name).namespace(namespace).query({
-    topK: query.topK,
-    vector,
-    includeMetadata: true,
-    ...(query.filter ? { filter: query.filter } : {}),
-  });
-  return response?.matches?.length ?? 0;
-}
-
 await sendRequest("initialize", {
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {},
@@ -160,31 +138,11 @@ const query = {
   topK: 3,
   inputs: { text: SEARCH_TEXT },
 };
-let search;
-try {
-  search = await callTool("search-records", {
-    name: searchableIndex.name,
-    namespace: searchableNamespace,
-    query,
-  });
-} catch (error) {
-  if (searchableIndex.embed) {
-    throw error;
-  }
-
-  const directHitCount = await probeStandardIndex({
-    name: searchableIndex.name,
-    namespace: searchableNamespace,
-    query,
-    dimension: searchableIndex.dimension,
-  });
-  if (directHitCount > 0) {
-    throw new Error(
-      "Pinecone data is searchable, but the deployed MCP lacks the standard-index adapter"
-    );
-  }
-  throw error;
-}
+const search = await callTool("search-records", {
+  name: searchableIndex.name,
+  namespace: searchableNamespace,
+  query,
+});
 const hitCount = search?.result?.hits?.length ?? search?.hits?.length ?? 0;
 if (hitCount === 0) {
   throw new Error("Pinecone search-records returned no hits");
