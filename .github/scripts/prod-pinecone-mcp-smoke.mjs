@@ -1,0 +1,148 @@
+const MCP_ENDPOINT =
+  process.env.MCP_ENDPOINT ?? "http://127.0.0.1:8000/mcp";
+const PROTOCOL_VERSION = "2025-03-26";
+const SEARCH_TEXT = "ข้อมูล";
+
+let sessionId;
+let nextRequestId = 1;
+
+function parseResponseBody(body, contentType) {
+  if (!body.trim()) {
+    return [];
+  }
+
+  if (!contentType.includes("text/event-stream")) {
+    return [JSON.parse(body)];
+  }
+
+  return body
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+    .filter((data) => data && data !== "[DONE]")
+    .map((data) => JSON.parse(data));
+}
+
+async function sendRequest(method, params = {}, notification = false) {
+  const id = notification ? undefined : nextRequestId++;
+  const headers = {
+    Accept: "application/json, text/event-stream",
+    "Content-Type": "application/json",
+  };
+  if (sessionId) {
+    headers["Mcp-Session-Id"] = sessionId;
+  }
+
+  const response = await fetch(MCP_ENDPOINT, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      ...(id === undefined ? {} : { id }),
+      method,
+      params,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`MCP ${method} returned HTTP ${response.status}`);
+  }
+
+  sessionId ??= response.headers.get("mcp-session-id") ?? undefined;
+  const body = await response.text();
+  if (notification) {
+    return undefined;
+  }
+
+  const messages = parseResponseBody(
+    body,
+    response.headers.get("content-type") ?? ""
+  );
+  const message = messages.find((item) => item.id === id);
+  if (!message) {
+    throw new Error(`MCP ${method} did not return request ${id}`);
+  }
+  if (message.error) {
+    throw new Error(`MCP ${method} returned a JSON-RPC error`);
+  }
+  return message.result;
+}
+
+async function callTool(name, args = {}) {
+  const result = await sendRequest("tools/call", {
+    name,
+    arguments: args,
+  });
+  if (result?.isError) {
+    throw new Error(`Pinecone tool ${name} returned an error`);
+  }
+
+  const text = result?.content?.find((item) => item.type === "text")?.text;
+  if (!text) {
+    throw new Error(`Pinecone tool ${name} returned no text result`);
+  }
+  return JSON.parse(text);
+}
+
+await sendRequest("initialize", {
+  protocolVersion: PROTOCOL_VERSION,
+  capabilities: {},
+  clientInfo: {
+    name: "onyx-prod-smoke",
+    version: "1.0.0",
+  },
+});
+await sendRequest("notifications/initialized", {}, true);
+
+const listedTools = await sendRequest("tools/list");
+const tools = listedTools?.tools ?? [];
+if (!tools.some((tool) => tool.name === "search-records")) {
+  throw new Error("Pinecone MCP does not expose search-records");
+}
+
+const listedIndexes = await callTool("list-indexes");
+const indexes = listedIndexes?.indexes ?? [];
+if (!indexes.length) {
+  throw new Error("Pinecone has no indexes");
+}
+
+let integratedIndex;
+for (const index of indexes) {
+  const description = await callTool("describe-index", { name: index.name });
+  if (description?.embed && description?.status?.ready) {
+    integratedIndex = description;
+    break;
+  }
+}
+if (!integratedIndex) {
+  throw new Error("Pinecone has no ready integrated-inference index");
+}
+
+const stats = await callTool("describe-index-stats", {
+  name: integratedIndex.name,
+});
+const namespaces = Object.entries(stats?.namespaces ?? {}).sort(
+  ([, left], [, right]) =>
+    (right?.recordCount ?? 0) - (left?.recordCount ?? 0)
+);
+const [namespace = "", namespaceStats] = namespaces[0] ?? [];
+if ((namespaceStats?.recordCount ?? 0) === 0) {
+  throw new Error("Pinecone integrated-inference index has no records");
+}
+
+const search = await callTool("search-records", {
+  name: integratedIndex.name,
+  namespace,
+  query: {
+    topK: 3,
+    inputs: { text: SEARCH_TEXT },
+  },
+});
+const hitCount = search?.result?.hits?.length ?? search?.hits?.length ?? 0;
+if (hitCount === 0) {
+  throw new Error("Pinecone search-records returned no hits");
+}
+
+console.log(
+  `Pinecone MCP smoke passed: ${tools.length} tools, ${indexes.length} indexes, ${hitCount} search hits.`
+);

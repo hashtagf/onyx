@@ -1,0 +1,51 @@
+name: Production Pinecone MCP smoke test
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: prod-pinecone-smoke
+  cancel-in-progress: false
+
+env:
+  PROJECT: k8s-ms-381210
+  WIF_PROVIDER: projects/695151832977/locations/global/workloadIdentityPools/github-actions/providers/github-oidc
+  DEPLOYER_SA: github-deployer@k8s-ms-381210.iam.gserviceaccount.com
+  VM: router9-vm
+  ZONE: asia-southeast1-a
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+      - name: Check gateway health and network exposure
+        run: |
+          gcloud compute ssh "$VM" --zone="$ZONE" --project="$PROJECT" \
+            --tunnel-through-iap --quiet --command '
+              set -eu
+              test "$(sudo docker inspect --format "{{.State.Health.Status}}" onyx-pinecone-mcp-gateway-1)" = healthy
+              if sudo ss -lntH | awk "{print \$4}" | grep -Eq "(^|:)8000$"; then
+                echo "Pinecone MCP port 8000 is exposed on the host"
+                exit 1
+              fi
+              echo "Pinecone MCP gateway is healthy and internal-only."
+            '
+      - name: Verify MCP tools and Pinecone search
+        run: |
+          gcloud compute ssh "$VM" --zone="$ZONE" --project="$PROJECT" \
+            --tunnel-through-iap --quiet \
+            --command "sudo docker exec -i onyx-pinecone-mcp-gateway-1 node --input-type=module" \
+            < .github/scripts/prod-pinecone-mcp-smoke.mjs
