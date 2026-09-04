@@ -8,6 +8,10 @@ on:
         required: true
         default: "191dde72619450f3d853c99292a94e370559e450"
         type: string
+      existing_build_id:
+        description: "Optional successful Cloud Build ID to reuse"
+        required: false
+        type: string
 
 permissions: {}
 
@@ -22,6 +26,7 @@ env:
   WIF_PROVIDER: projects/695151832977/locations/global/workloadIdentityPools/github-actions/providers/github-oidc
   DEPLOYER_SA: github-deployer@k8s-ms-381210.iam.gserviceaccount.com
   ROUTER_REF: ${{ inputs.router_ref }}
+  EXISTING_BUILD_ID: ${{ inputs.existing_build_id }}
 
 jobs:
   build:
@@ -49,18 +54,21 @@ jobs:
         run: |
           short_sha=$(git -C 9router rev-parse --short HEAD)
           image="$GAR/9router:router-$short_sha"
-          build_id=$(gcloud builds submit 9router --async \
-            --project="$PROJECT" --region="$REGION" \
-            --machine-type=e2-highcpu-8 --timeout=3600s \
-            --format="value(id)" \
-            --config=/dev/stdin <<EOF
+          build_id="$EXISTING_BUILD_ID"
+          if [ -z "$build_id" ]; then
+            build_id=$(gcloud builds submit 9router --async \
+              --project="$PROJECT" --region="$REGION" \
+              --machine-type=e2-highcpu-8 --timeout=3600s \
+              --format="value(id)" \
+              --config=/dev/stdin <<EOF
           steps:
           - name: gcr.io/cloud-builders/docker
             env: [DOCKER_BUILDKIT=1]
             args: [build, --tag, $image, .]
           images: [$image]
           EOF
-          )
+            )
+          fi
           echo "Build: https://console.cloud.google.com/cloud-build/builds;region=$REGION/$build_id?project=$PROJECT"
           while :; do
             status=$(gcloud builds describe "$build_id" \
@@ -74,8 +82,9 @@ jobs:
             sleep 30
           done
 
-          digest=$(gcloud artifacts docker images describe "$image" \
-            --project="$PROJECT" --format="value(image_summary.digest)")
+          digest=$(gcloud builds describe "$build_id" \
+            --project="$PROJECT" --region="$REGION" \
+            --format="value(results.images[0].digest)")
           test -n "$digest"
           pinned="$GAR/9router@$digest"
           echo "Pinned image: $pinned"
