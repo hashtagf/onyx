@@ -38,6 +38,15 @@ jobs:
             --tunnel-through-iap --quiet --command '
               set -eu
               test "$(sudo docker inspect --format "{{.State.Health.Status}}" onyx-pinecone-mcp-gateway-1)" = healthy
+              image=$(sudo docker inspect --format "{{.Config.Image}}" onyx-pinecone-mcp-gateway-1)
+              case "$image" in
+                *@sha256:*) ;;
+                *)
+                  echo "Pinecone MCP gateway does not use an immutable digest"
+                  exit 1
+                  ;;
+              esac
+              test "$(sudo docker inspect --format "{{range .Config.Env}}{{println .}}{{end}}" onyx-pinecone-mcp-gateway-1 | grep -c "^PINECONE_MIN_SCORE=0.82$")" = 1
               if sudo ss -lntH | awk "{print \$4}" | grep -Eq "(^|:)8000$"; then
                 echo "Pinecone MCP port 8000 is exposed on the host"
                 exit 1
@@ -64,5 +73,10 @@ jobs:
                 -e PINECONE_EXPECTED_INDEX_NAME=idip-indo \
                 -e PINECONE_EXPECTED_NAMESPACE=54f715a4-f4a7-45e7-971a-dd041b28a7bc \
                 "$image" --input-type=module
+              process_count=$(sudo docker top onyx-pinecone-mcp-gateway-1 -eo pid | tail -n +2 | wc -l)
+              test "$process_count" -eq 1
+              thread_count=$(sudo docker stats --no-stream --format "{{.PIDs}}" onyx-pinecone-mcp-gateway-1)
+              test "$thread_count" -le 32
+              echo "Pinecone MCP gateway process count is stable."
             ' \
             < .github/scripts/prod-pinecone-mcp-smoke.mjs
