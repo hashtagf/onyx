@@ -1,7 +1,14 @@
 const MCP_ENDPOINT =
   process.env.MCP_ENDPOINT ?? "http://127.0.0.1:8000/mcp";
+const MCP_REQUEST_TIMEOUT_MS = 45_000;
 const PROTOCOL_VERSION = "2025-03-26";
 const SEARCH_TEXT = "ข้อมูล";
+const EXPECTED_TOOL_NAMES = [
+  "describe-index",
+  "describe-index-stats",
+  "list-indexes",
+  "search-records",
+];
 
 let sessionId;
 let nextRequestId = 1;
@@ -42,6 +49,7 @@ async function sendRequest(method, params = {}, notification = false) {
       method,
       params,
     }),
+    signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -96,8 +104,12 @@ await sendRequest("notifications/initialized", {}, true);
 
 const listedTools = await sendRequest("tools/list");
 const tools = listedTools?.tools ?? [];
-if (!tools.some((tool) => tool.name === "search-records")) {
-  throw new Error("Pinecone MCP does not expose search-records");
+const toolNames = tools.map((tool) => tool.name).sort();
+if (toolNames.join("\n") !== EXPECTED_TOOL_NAMES.join("\n")) {
+  throw new Error("Pinecone MCP does not expose the expected read-only tools");
+}
+if (tools.some((tool) => tool.annotations?.readOnlyHint !== true)) {
+  throw new Error("Pinecone MCP exposes a tool without the read-only annotation");
 }
 
 const listedIndexes = await callTool("list-indexes");
