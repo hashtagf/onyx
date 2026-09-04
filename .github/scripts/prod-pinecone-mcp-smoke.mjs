@@ -3,6 +3,8 @@ const MCP_ENDPOINT =
 const MCP_REQUEST_TIMEOUT_MS = 45_000;
 const PROTOCOL_VERSION = "2025-03-26";
 const SEARCH_TEXT = "ข้อมูล";
+const EXPECTED_INDEX_NAME = process.env.PINECONE_EXPECTED_INDEX_NAME;
+const EXPECTED_NAMESPACE = process.env.PINECONE_EXPECTED_NAMESPACE;
 const EXPECTED_TOOL_NAMES = [
   "describe-index",
   "describe-index-stats",
@@ -92,6 +94,26 @@ async function callTool(name, args = {}) {
   return JSON.parse(text);
 }
 
+async function closeSession() {
+  if (!sessionId) {
+    return;
+  }
+
+  const response = await fetch(MCP_ENDPOINT, {
+    method: "DELETE",
+    headers: {
+      Accept: "application/json, text/event-stream",
+      "Mcp-Session-Id": sessionId,
+    },
+    signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(`MCP session close returned HTTP ${response.status}`);
+  }
+  sessionId = undefined;
+}
+
+async function runSmokeTest() {
 await sendRequest("initialize", {
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {},
@@ -121,6 +143,10 @@ if (!indexes.length) {
 let searchableIndex;
 let searchableNamespace;
 for (const index of indexes) {
+  if (EXPECTED_INDEX_NAME && index.name !== EXPECTED_INDEX_NAME) {
+    continue;
+  }
+
   const description = await callTool("describe-index", { name: index.name });
   const isCompatibleStandardIndex =
     !description?.embed && description?.dimension === 1024;
@@ -135,7 +161,11 @@ for (const index of indexes) {
     ([, left], [, right]) =>
       (right?.recordCount ?? 0) - (left?.recordCount ?? 0)
   );
-  const [namespace = "", namespaceStats] = namespaces[0] ?? [];
+  const selectedNamespace =
+    EXPECTED_NAMESPACE === undefined
+      ? namespaces[0]
+      : namespaces.find(([namespace]) => namespace === EXPECTED_NAMESPACE);
+  const [namespace = "", namespaceStats] = selectedNamespace ?? [];
   if ((namespaceStats?.recordCount ?? 0) > 0) {
     searchableIndex = description;
     searchableNamespace = namespace;
@@ -145,6 +175,11 @@ for (const index of indexes) {
 if (!searchableIndex) {
   throw new Error(
     "Pinecone has no ready populated standard index with a compatible embedding"
+  );
+}
+if (process.env.PINECONE_REPORT_SELECTION === "true") {
+  console.log(
+    `Selected Pinecone target: ${searchableIndex.name} / ${searchableNamespace}`
   );
 }
 
@@ -174,3 +209,10 @@ if (
 console.log(
   `Pinecone MCP smoke passed: ${tools.length} tools, ${indexes.length} indexes, ${hits.length} grounded search hits.`
 );
+}
+
+try {
+  await runSmokeTest();
+} finally {
+  await closeSession();
+}
