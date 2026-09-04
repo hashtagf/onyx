@@ -61,6 +61,8 @@ jobs:
                 --security-opt no-new-privileges:true \
                 --entrypoint node \
                 -e MCP_ENDPOINT=http://pinecone-mcp-gateway:8000/mcp \
+                -e PINECONE_EXPECTED_INDEX_NAME=idip-indo \
+                -e PINECONE_EXPECTED_NAMESPACE=54f715a4-f4a7-45e7-971a-dd041b28a7bc \
                 "$image" --input-type=module
             ' \
             < .github/scripts/prod-pinecone-mcp-smoke.mjs
