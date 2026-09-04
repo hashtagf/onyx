@@ -46,6 +46,19 @@ jobs:
       - name: Verify MCP tools and Pinecone search
         run: |
           gcloud compute ssh "$VM" --zone="$ZONE" --project="$PROJECT" \
-            --tunnel-through-iap --quiet \
-            --command "sudo docker exec -i onyx-pinecone-mcp-gateway-1 node --input-type=module" \
+            --tunnel-through-iap --quiet --command '
+              set -eu
+              image=$(sudo docker inspect --format "{{.Config.Image}}" onyx-pinecone-mcp-gateway-1)
+              sudo docker run --rm -i \
+                --network onyx_default \
+                --memory 256m \
+                --pids-limit 64 \
+                --read-only \
+                --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+                --cap-drop ALL \
+                --security-opt no-new-privileges:true \
+                --entrypoint node \
+                -e MCP_ENDPOINT=http://pinecone-mcp-gateway:8000/mcp \
+                "$image" --input-type=module
+            ' \
             < .github/scripts/prod-pinecone-mcp-smoke.mjs
