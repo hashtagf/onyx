@@ -2,7 +2,8 @@ const MCP_ENDPOINT =
   process.env.MCP_ENDPOINT ?? "http://127.0.0.1:8000/mcp";
 const MCP_REQUEST_TIMEOUT_MS = 45_000;
 const PROTOCOL_VERSION = "2025-03-26";
-const SEARCH_TEXT = "ข้อมูล";
+const SEARCH_TEXT = "ระบบ UAT Dashboard ไม่ตรง เกิดปัญหาอะไร";
+const NO_MATCH_SEARCH_TEXT = "ZXQ-9f82 มังกรอวกาศสีม่วงบนดาวเนปจูน";
 const EXPECTED_INDEX_NAME = process.env.PINECONE_EXPECTED_INDEX_NAME;
 const EXPECTED_NAMESPACE = process.env.PINECONE_EXPECTED_NAMESPACE;
 const EXPECTED_TOOL_NAMES = [
@@ -205,9 +206,28 @@ if (
 ) {
   throw new Error("Pinecone search-records returned no grounding text");
 }
+const groundingText = hits
+  .map((hit) => hit?.fields?.content_preview ?? "")
+  .join("\n");
+if (!groundingText.includes("Master") || !groundingText.includes("Agent")) {
+  throw new Error("Pinecone search-records returned the wrong known answer");
+}
+
+const noMatchSearch = await callTool("search-records", {
+  name: searchableIndex.name,
+  namespace: searchableNamespace,
+  query: {
+    topK: 3,
+    inputs: { text: NO_MATCH_SEARCH_TEXT },
+  },
+});
+const noMatchHits = noMatchSearch?.result?.hits ?? noMatchSearch?.hits ?? [];
+if (!Array.isArray(noMatchHits) || noMatchHits.length !== 0) {
+  throw new Error("Pinecone relevance guard returned an unrelated search hit");
+}
 
 console.log(
-  `Pinecone MCP smoke passed: ${tools.length} tools, ${indexes.length} indexes, ${hits.length} grounded search hits.`
+  `Pinecone MCP smoke passed: ${tools.length} tools, ${indexes.length} indexes, ${hits.length} grounded search hits, no-match guard passed.`
 );
 }
 
