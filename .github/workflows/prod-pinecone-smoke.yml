@@ -33,6 +33,7 @@ jobs:
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
       - name: Check gateway health and network exposure
         run: |
+          # shellcheck disable=SC2016 # Expand these values on the remote host.
           gcloud compute ssh "$VM" --zone="$ZONE" --project="$PROJECT" \
             --tunnel-through-iap --quiet --command '
               set -eu
@@ -45,6 +46,7 @@ jobs:
             '
       - name: Verify MCP tools and Pinecone search
         run: |
+          # shellcheck disable=SC2016 # Expand these values on the remote host.
           gcloud compute ssh "$VM" --zone="$ZONE" --project="$PROJECT" \
             --tunnel-through-iap --quiet --command '
               set -eu
