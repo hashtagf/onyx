@@ -266,7 +266,7 @@ class MCPTool(Tool[None]):
 
             # Format the tool result for response
             tool_result_dict = {"tool_result": tool_result}
-            llm_facing_response = json.dumps(tool_result_dict)
+            llm_facing_response = json.dumps(tool_result_dict, ensure_ascii=False)
 
             # Emit CustomToolDelta packet
             self.emitter.emit(

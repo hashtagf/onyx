@@ -233,5 +233,20 @@ class TestMCPToolLLMNames:
         assert mock_call_mcp_tool.call_args.args[1] == "shared"
 
 
+class TestMCPToolResponseSerialization:
+    def test_llm_response_preserves_unicode_tool_text(self) -> None:
+        tool = _make_tool({"type": "object"})
+        tool_result = '{"content_preview":"ยูส Master และยูส Agent ได้ค่าไม่เท่ากัน"}'
+
+        with patch(
+            "onyx.tools.tool_implementations.mcp.mcp_tool.call_mcp_tool",
+            return_value=tool_result,
+        ):
+            response = tool.run(Placement(turn_index=0))
+
+        assert "ยูส Master และยูส Agent ได้ค่าไม่เท่ากัน" in (response.llm_facing_response)
+        assert "\\u0e22" not in response.llm_facing_response
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-xv"])
