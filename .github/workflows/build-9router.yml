@@ -1,0 +1,83 @@
+name: Build pinned 9Router image
+
+on:
+  workflow_dispatch:
+    inputs:
+      router_ref:
+        description: "Full commit SHA from hashtagf/9router"
+        required: true
+        default: "191dde72619450f3d853c99292a94e370559e450"
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: build-9router
+  cancel-in-progress: false
+
+env:
+  PROJECT: k8s-ms-381210
+  REGION: asia-southeast1
+  GAR: asia-southeast1-docker.pkg.dev/k8s-ms-381210/onyx
+  WIF_PROVIDER: projects/695151832977/locations/global/workloadIdentityPools/github-actions/providers/github-oidc
+  DEPLOYER_SA: github-deployer@k8s-ms-381210.iam.gserviceaccount.com
+  ROUTER_REF: ${{ inputs.router_ref }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          repository: hashtagf/9router
+          ref: ${{ env.ROUTER_REF }}
+          path: 9router
+          persist-credentials: false
+      - name: Verify immutable source ref
+        working-directory: 9router
+        run: |
+          test "$(git rev-parse HEAD)" = "$ROUTER_REF"
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+      - name: Build image on Cloud Build
+        run: |
+          short_sha=$(git -C 9router rev-parse --short HEAD)
+          image="$GAR/9router:router-$short_sha"
+          build_id=$(gcloud builds submit 9router --async \
+            --project="$PROJECT" --region="$REGION" \
+            --machine-type=e2-highcpu-8 --timeout=3600s \
+            --format="value(id)" \
+            --config=/dev/stdin <<EOF
+          steps:
+          - name: gcr.io/cloud-builders/docker
+            env: [DOCKER_BUILDKIT=1]
+            args: [build, --tag, $image, .]
+          images: [$image]
+          EOF
+          )
+          echo "Build: https://console.cloud.google.com/cloud-build/builds;region=$REGION/$build_id?project=$PROJECT"
+          while :; do
+            status=$(gcloud builds describe "$build_id" \
+              --project="$PROJECT" --region="$REGION" \
+              --format="value(status)")
+            echo "status: $status"
+            case "$status" in
+              SUCCESS) break ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED) exit 1 ;;
+            esac
+            sleep 30
+          done
+
+          digest=$(gcloud artifacts docker images describe "$image" \
+            --project="$PROJECT" --format="value(image_summary.digest)")
+          test -n "$digest"
+          pinned="$GAR/9router@$digest"
+          echo "Pinned image: $pinned"
+          echo "### 9Router image" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$pinned\`" >> "$GITHUB_STEP_SUMMARY"
