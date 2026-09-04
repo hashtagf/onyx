@@ -1,7 +1,11 @@
 import json
 import re
 
-from onyx.configs.chat_configs import SECONDARY_LLM_FLOW_TIMEOUT_S
+from onyx.configs.chat_configs import (
+    DOCUMENT_RELEVANCE_MAX_OUTPUT_TOKENS,
+    DOCUMENT_SELECTION_MAX_OUTPUT_TOKENS,
+    SECONDARY_LLM_FLOW_TIMEOUT_S,
+)
 from onyx.context.search.models import (
     ContextExpansionType,
     InferenceChunk,
@@ -139,6 +143,8 @@ def classify_section_relevance(
                 prompt=prompt_msg,
                 reasoning_effort=ReasoningEffort.OFF,
                 timeout_override=SECONDARY_LLM_FLOW_TIMEOUT_S,
+                total_timeout_override=SECONDARY_LLM_FLOW_TIMEOUT_S,
+                max_tokens=DOCUMENT_RELEVANCE_MAX_OUTPUT_TOKENS,
             )
             record_llm_response(span_generation, response)
             llm_response = response.choice.message.content
@@ -293,6 +299,8 @@ def select_sections_for_expansion(
                 prompt=[prompt_text],
                 reasoning_effort=ReasoningEffort.OFF,
                 timeout_override=SECONDARY_LLM_FLOW_TIMEOUT_S,
+                total_timeout_override=SECONDARY_LLM_FLOW_TIMEOUT_S,
+                max_tokens=DOCUMENT_SELECTION_MAX_OUTPUT_TOKENS,
             )
             record_llm_response(span_generation, response)
             llm_response = response.choice.message.content

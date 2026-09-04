@@ -55,6 +55,20 @@ DR_REPORT_LLM_TIMEOUT_S = int(os.environ.get("DR_REPORT_LLM_TIMEOUT_S") or "60")
 SECONDARY_LLM_FLOW_TIMEOUT_S = int(
     os.environ.get("SECONDARY_LLM_FLOW_TIMEOUT_S") or "60"
 )
+# Search document selection and expansion need short, bounded outputs. These
+# limits also protect local models that ignore the requested reasoning mode.
+DOCUMENT_SELECTION_MAX_OUTPUT_TOKENS = int(
+    os.environ.get("DOCUMENT_SELECTION_MAX_OUTPUT_TOKENS") or "256"
+)
+DOCUMENT_RELEVANCE_MAX_OUTPUT_TOKENS = int(
+    os.environ.get("DOCUMENT_RELEVANCE_MAX_OUTPUT_TOKENS") or "32"
+)
+DOCUMENT_CONTEXT_EXPANSION_ENABLED = (
+    os.environ.get("DOCUMENT_CONTEXT_EXPANSION_ENABLED") or "false"
+).lower() in ("true", "1")
+DOCUMENT_CONTEXT_EXPANSION_MAX_WORKERS = max(
+    1, int(os.environ.get("DOCUMENT_CONTEXT_EXPANSION_MAX_WORKERS") or "2")
+)
 # Live buffer TTL. Refreshed per write.
 CHAT_STREAM_BUFFER_TTL_S = int(os.environ.get("CHAT_STREAM_BUFFER_TTL_S") or 3600)
 # Retention after the run is done.

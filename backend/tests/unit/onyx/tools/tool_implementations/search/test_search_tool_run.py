@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+from onyx.configs.chat_configs import DOCUMENT_CONTEXT_EXPANSION_MAX_WORKERS
 from onyx.configs.constants import DocumentSource, MessageType
 from onyx.context.search.models import BaseFilters
 from onyx.server.query_and_chat.placement import Placement
 from onyx.server.query_and_chat.streaming_models import SearchToolFilterDelta
 from onyx.tools.models import ChatMinimalTextMessage, SearchToolOverrideKwargs
 from onyx.tools.tool_implementations.search.search_tool import SearchTool
+from onyx.utils.threadpool_concurrency import run_functions_tuples_in_parallel
 
 MODULE = "onyx.tools.tool_implementations.search.search_tool"
 
@@ -42,6 +44,8 @@ def _run(
     decision: ScopeDecision = None,
     decide_mock: MagicMock | None = None,
     skip_query_expansion: bool = False,
+    top_sections: list[MagicMock] | None = None,
+    merge_overlapping_mock: MagicMock | None = None,
 ) -> MagicMock:
     """Run tool.run() with all DB/LLM deps mocked; returns the search_pipeline mock.
 
@@ -50,6 +54,10 @@ def _run(
     returns no chunks, so run() takes the empty-results early return.
     """
     mock_search_pipeline = MagicMock(return_value=[])
+    merged_sections = top_sections or []
+    merge_overlapping = merge_overlapping_mock or MagicMock(
+        side_effect=lambda sections: sections
+    )
     decide = (
         decide_mock if decide_mock is not None else MagicMock(return_value=decision)
     )
@@ -67,8 +75,28 @@ def _run(
         patch(f"{MODULE}.decide_search_scope", decide),
         patch(f"{MODULE}.decide_time_filter", MagicMock(return_value=None)),
         patch(f"{MODULE}.weighted_reciprocal_rank_fusion", return_value=[]),
-        patch(f"{MODULE}.merge_individual_chunks", return_value=[]),
+        patch(f"{MODULE}.merge_individual_chunks", return_value=merged_sections),
         patch(f"{MODULE}.search_pipeline", mock_search_pipeline),
+        patch(f"{MODULE}.populate_file_ids_on_sections"),
+        patch(f"{MODULE}.get_llm_token_counter", return_value=MagicMock()),
+        patch(f"{MODULE}._trim_sections_by_tokens", return_value=merged_sections),
+        patch(
+            f"{MODULE}.select_sections_for_expansion",
+            return_value=(merged_sections, None),
+        ),
+        patch(f"{MODULE}.convert_inference_sections_to_search_docs", return_value=[]),
+        patch(
+            f"{MODULE}.expand_section_with_context",
+            side_effect=lambda section, **_kwargs: section,
+        ),
+        patch(
+            f"{MODULE}.merge_overlapping_sections",
+            merge_overlapping,
+        ),
+        patch(
+            f"{MODULE}.convert_inference_sections_to_llm_string",
+            return_value=("search context", {}),
+        ),
     ):
         mock_session_ctx.return_value.__enter__ = MagicMock(return_value=MagicMock())
         mock_session_ctx.return_value.__exit__ = MagicMock(return_value=False)
@@ -88,6 +116,59 @@ def _run(
             queries=["ticket"],
         )
     return mock_search_pipeline
+
+
+def test_context_expansion_uses_bounded_worker_count() -> None:
+    tool = _make_tool()
+    section = MagicMock()
+    section.center_chunk.document_id = "document-1"
+
+    with (
+        patch(f"{MODULE}.DOCUMENT_CONTEXT_EXPANSION_ENABLED", True),
+        patch(
+            f"{MODULE}.run_functions_tuples_in_parallel",
+            wraps=run_functions_tuples_in_parallel,
+        ) as parallel,
+    ):
+        _run(
+            tool,
+            connected_sources=[DocumentSource.CONFLUENCE],
+            skip_query_expansion=True,
+            top_sections=[section],
+        )
+
+    expansion_calls = [
+        call
+        for call in parallel.call_args_list
+        if call.kwargs.get("max_workers") == DOCUMENT_CONTEXT_EXPANSION_MAX_WORKERS
+    ]
+    assert len(expansion_calls) == 1
+    assert len(expansion_calls[0].args[0]) == 1
+
+
+def test_context_expansion_can_be_disabled_without_losing_selected_sections() -> None:
+    tool = _make_tool()
+    section = MagicMock()
+    section.center_chunk.document_id = "document-1"
+    merge = MagicMock(return_value=[section])
+
+    with (
+        patch(f"{MODULE}.DOCUMENT_CONTEXT_EXPANSION_ENABLED", False),
+        patch(
+            f"{MODULE}.run_functions_tuples_in_parallel",
+            wraps=run_functions_tuples_in_parallel,
+        ) as parallel,
+    ):
+        _run(
+            tool,
+            connected_sources=[DocumentSource.CONFLUENCE],
+            skip_query_expansion=True,
+            top_sections=[section],
+            merge_overlapping_mock=merge,
+        )
+
+    assert all("max_workers" not in call.kwargs for call in parallel.call_args_list)
+    merge.assert_called_once_with([section])
 
 
 def _filters_passed_to_search(mock_search_pipeline: MagicMock) -> list[Any]:

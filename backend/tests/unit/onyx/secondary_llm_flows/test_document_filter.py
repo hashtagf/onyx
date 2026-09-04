@@ -2,7 +2,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-from onyx.configs.chat_configs import SECONDARY_LLM_FLOW_TIMEOUT_S
+from onyx.configs.chat_configs import (
+    DOCUMENT_RELEVANCE_MAX_OUTPUT_TOKENS,
+    DOCUMENT_SELECTION_MAX_OUTPUT_TOKENS,
+    SECONDARY_LLM_FLOW_TIMEOUT_S,
+)
 from onyx.configs.constants import DocumentSource
 from onyx.context.search.models import (
     ContextExpansionType,
@@ -79,8 +83,12 @@ def test_classify_section_relevance_timeout_falls_back(
     )
 
     assert result == ContextExpansionType.MAIN_SECTION_ONLY
-    # the bound that makes the call fail fast must actually be passed through
     assert invoke.call_args.kwargs["timeout_override"] == SECONDARY_LLM_FLOW_TIMEOUT_S
+    assert (
+        invoke.call_args.kwargs["total_timeout_override"]
+        == SECONDARY_LLM_FLOW_TIMEOUT_S
+    )
+    assert invoke.call_args.kwargs["max_tokens"] == DOCUMENT_RELEVANCE_MAX_OUTPUT_TOKENS
 
 
 @patch("onyx.secondary_llm_flows.document_filter.record_llm_response")
@@ -107,6 +115,11 @@ def test_classify_section_relevance_passes_timeout_on_success(
 
     assert result == ContextExpansionType.FULL_DOCUMENT
     assert invoke.call_args.kwargs["timeout_override"] == SECONDARY_LLM_FLOW_TIMEOUT_S
+    assert (
+        invoke.call_args.kwargs["total_timeout_override"]
+        == SECONDARY_LLM_FLOW_TIMEOUT_S
+    )
+    assert invoke.call_args.kwargs["max_tokens"] == DOCUMENT_RELEVANCE_MAX_OUTPUT_TOKENS
 
 
 @patch("onyx.secondary_llm_flows.document_filter.record_llm_response")
@@ -130,6 +143,11 @@ def test_select_sections_for_expansion_timeout_falls_back(
     assert selected == sections
     assert doc_ids is None
     assert invoke.call_args.kwargs["timeout_override"] == SECONDARY_LLM_FLOW_TIMEOUT_S
+    assert (
+        invoke.call_args.kwargs["total_timeout_override"]
+        == SECONDARY_LLM_FLOW_TIMEOUT_S
+    )
+    assert invoke.call_args.kwargs["max_tokens"] == DOCUMENT_SELECTION_MAX_OUTPUT_TOKENS
 
 
 @patch("onyx.secondary_llm_flows.document_filter.record_llm_response")
@@ -152,3 +170,8 @@ def test_select_sections_for_expansion_passes_timeout_on_success(
 
     assert selected == sections
     assert invoke.call_args.kwargs["timeout_override"] == SECONDARY_LLM_FLOW_TIMEOUT_S
+    assert (
+        invoke.call_args.kwargs["total_timeout_override"]
+        == SECONDARY_LLM_FLOW_TIMEOUT_S
+    )
+    assert invoke.call_args.kwargs["max_tokens"] == DOCUMENT_SELECTION_MAX_OUTPUT_TOKENS

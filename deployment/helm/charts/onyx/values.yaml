@@ -1557,6 +1557,14 @@ configMap:
   IMAGE_SUMMARIZATION_TIMEOUT: "300"
   CONTEXTUAL_RAG_LLM_TIMEOUT: "180"
   MAX_CHUNKS_FED_TO_CHAT: ""
+  # Maximum tokens for the search section-selection response. Default: 256.
+  DOCUMENT_SELECTION_MAX_OUTPUT_TOKENS: ""
+  # Maximum tokens for each search relevance response. Default: 32.
+  DOCUMENT_RELEVANCE_MAX_OUTPUT_TOKENS: ""
+  # Enable LLM classification before document context expansion. Default: false.
+  DOCUMENT_CONTEXT_EXPANSION_ENABLED: ""
+  # Maximum concurrent document context expansions. Default: 2.
+  DOCUMENT_CONTEXT_EXPANSION_MAX_WORKERS: ""
   # Usage / cost accounting
   # Records priced generation spans into the per-user usage ledger (default on).
   # Set to "false" to disable the recording processor entirely.

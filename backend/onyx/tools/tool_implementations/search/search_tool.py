@@ -42,7 +42,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from onyx.chat.emitter import Emitter
-from onyx.configs.chat_configs import MAX_CHUNKS_FED_TO_CHAT
+from onyx.configs.chat_configs import (
+    DOCUMENT_CONTEXT_EXPANSION_ENABLED,
+    DOCUMENT_CONTEXT_EXPANSION_MAX_WORKERS,
+    MAX_CHUNKS_FED_TO_CHAT,
+)
 from onyx.configs.constants import DocumentSource, FederatedConnectorSource
 from onyx.context.search.federated.slack_search import slack_retrieval
 from onyx.context.search.models import (
@@ -1178,8 +1182,16 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
         # Start timing for document expansion
         document_expansion_start_time = time.time()
 
-        # Run all expansions in parallel
-        expanded_sections = run_functions_tuples_in_parallel(expansion_functions)
+        # Some local models cannot absorb one classification request per
+        # section. The selected sections remain valid context when disabled.
+        expanded_sections = (
+            run_functions_tuples_in_parallel(
+                expansion_functions,
+                max_workers=DOCUMENT_CONTEXT_EXPANSION_MAX_WORKERS,
+            )
+            if DOCUMENT_CONTEXT_EXPANSION_ENABLED
+            else selected_sections
+        )
 
         # End timing for document expansion
         document_expansion_elapsed = time.time() - document_expansion_start_time
