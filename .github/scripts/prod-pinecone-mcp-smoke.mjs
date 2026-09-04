@@ -122,9 +122,9 @@ let searchableIndex;
 let searchableNamespace;
 for (const index of indexes) {
   const description = await callTool("describe-index", { name: index.name });
-  const supportsConfiguredEmbedding =
-    description?.embed || description?.dimension === 1024;
-  if (!description?.status?.ready || !supportsConfiguredEmbedding) {
+  const isCompatibleStandardIndex =
+    !description?.embed && description?.dimension === 1024;
+  if (!description?.status?.ready || !isCompatibleStandardIndex) {
     continue;
   }
 
@@ -143,7 +143,9 @@ for (const index of indexes) {
   }
 }
 if (!searchableIndex) {
-  throw new Error("Pinecone has no ready populated index with a compatible embedding");
+  throw new Error(
+    "Pinecone has no ready populated standard index with a compatible embedding"
+  );
 }
 
 const query = {
@@ -155,11 +157,20 @@ const search = await callTool("search-records", {
   namespace: searchableNamespace,
   query,
 });
-const hitCount = search?.result?.hits?.length ?? search?.hits?.length ?? 0;
-if (hitCount === 0) {
+const hits = search?.result?.hits ?? search?.hits ?? [];
+if (!Array.isArray(hits) || hits.length === 0) {
   throw new Error("Pinecone search-records returned no hits");
+}
+if (
+  !hits.some(
+    (hit) =>
+      typeof hit?.fields?.content_preview === "string" &&
+      hit.fields.content_preview.trim().length > 0
+  )
+) {
+  throw new Error("Pinecone search-records returned no grounding text");
 }
 
 console.log(
-  `Pinecone MCP smoke passed: ${tools.length} tools, ${indexes.length} indexes, ${hitCount} search hits.`
+  `Pinecone MCP smoke passed: ${tools.length} tools, ${indexes.length} indexes, ${hits.length} grounded search hits.`
 );
